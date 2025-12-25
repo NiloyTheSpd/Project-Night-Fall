@@ -615,6 +615,51 @@ void processCameraCommand(const JsonDocument &cmd)
     {
         // Acknowledge master heartbeat
         handleHeartbeat();
+
+        // Optional: log distance data if present
+        if (cmd["data"].containsKey("front_distance"))
+        {
+            float fd = cmd["data"]["front_distance"].as<float>();
+            float rd = cmd["data"]["rear_distance"].as<float>();
+            DEBUG_PRINT("[CAM] Heartbeat distances - Front: ");
+            DEBUG_PRINT(fd);
+            DEBUG_PRINT(" cm, Rear: ");
+            DEBUG_PRINT(rd);
+            DEBUG_PRINTLN(" cm");
+        }
+    }
+    else if (strcmp(type, "sensor_data") == 0)
+    {
+        handleSensorUpdate(cmd);
+    }
+}
+
+void handleSensorUpdate(const JsonDocument &sensorMsg)
+{
+    float frontDist = sensorMsg["data"]["front_distance"] | -1.0f;
+    float rearDist = sensorMsg["data"]["rear_distance"] | -1.0f;
+    bool obstacleDetected = sensorMsg["data"]["obstacle_detected"] | false;
+    bool emergencyTriggered = sensorMsg["data"]["emergency_triggered"] | false;
+    int gasLevel = sensorMsg["data"]["gas_level"] | 0;
+
+    DEBUG_PRINT("[CAM] Sensor Update - Front: ");
+    DEBUG_PRINT(frontDist);
+    DEBUG_PRINT(" cm, Rear: ");
+    DEBUG_PRINT(rearDist);
+    DEBUG_PRINT(" cm, Gas: ");
+    DEBUG_PRINT(gasLevel);
+    DEBUG_PRINTLN();
+
+    if (obstacleDetected)
+    {
+        DEBUG_PRINT("[CAM] ⚠️ Obstacle detected at ");
+        DEBUG_PRINT(frontDist);
+        DEBUG_PRINTLN(" cm");
+    }
+
+    if (emergencyTriggered)
+    {
+        DEBUG_PRINTLN("[CAM] 🚨 EMERGENCY: Distance threshold breached!");
     }
 }
 

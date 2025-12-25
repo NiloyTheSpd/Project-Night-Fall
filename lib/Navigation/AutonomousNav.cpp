@@ -5,7 +5,10 @@ AutonomousNav::AutonomousNav()
     : _currentState(NAV_FORWARD), _previousState(NAV_FORWARD),
       _frontDistance(0), _rearDistance(0), _lastFrontDistance(0),
       _stateStartTime(0), _lastDecisionTime(0),
-      _stuckCounter(0), _turnDirection(1) {}
+      _stuckCounter(0), _turnDirection(1),
+      _obstacleThreshold(OBSTACLE_THRESHOLD),
+      _clearanceThreshold(OBSTACLE_THRESHOLD + 10.0f),
+      _obstacleState(false) {}
 
 void AutonomousNav::begin()
 {
@@ -227,7 +230,26 @@ MovementCommand AutonomousNav::handleScanning()
 
 bool AutonomousNav::isObstacleDetected()
 {
-    return (_frontDistance > 0 && _frontDistance < OBSTACLE_THRESHOLD);
+    // Hysteresis prevents oscillation at threshold
+    // Obstacle detected at 30cm, but must exceed 40cm to clear
+    if (!_obstacleState && _frontDistance > 0 && _frontDistance < _obstacleThreshold)
+    {
+        _obstacleState = true; // Obstacle detected
+        DEBUG_PRINT("[NAV] Obstacle detected at ");
+        DEBUG_PRINT(_frontDistance);
+        DEBUG_PRINTLN("cm");
+        return true;
+    }
+    else if (_obstacleState && _frontDistance > _clearanceThreshold)
+    {
+        _obstacleState = false; // Path cleared
+        DEBUG_PRINT("[NAV] Path cleared at ");
+        DEBUG_PRINT(_frontDistance);
+        DEBUG_PRINTLN("cm");
+        return false;
+    }
+
+    return _obstacleState; // Maintain current state in deadzone (30-40cm)
 }
 
 bool AutonomousNav::isClimbableObstacle()

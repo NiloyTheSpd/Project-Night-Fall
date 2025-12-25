@@ -41,6 +41,11 @@ private:
     int _stuckCounter;
     int _turnDirection; // -1 = left, 1 = right
 
+    // Hysteresis for obstacle detection
+    float _obstacleThreshold;
+    float _clearanceThreshold;
+    bool _obstacleState;
+
     // Navigation methods
     MovementCommand handleForward();
     MovementCommand handleAvoiding();
@@ -59,4 +64,3 @@ private:
 };
 
 #endif // AUTONOMOUS_NAV_H
-

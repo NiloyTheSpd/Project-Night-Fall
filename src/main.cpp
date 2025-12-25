@@ -73,6 +73,7 @@ NavigationState navState = NAV_FORWARD;
 bool isMaster = true;
 float lastFrontDistance = 0.0f;
 float lastRearDistance = 0.0f;
+unsigned long lastRearDistanceTime = 0; // Phase 3.1: Track rear distance timestamp
 int gasValue = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long lastNavUpdate = 0;
@@ -124,8 +125,10 @@ void handleFrontSensors();
 void updateAutonomousNavigation();
 void sendHeartbeatToRear();
 void sendHeartbeatToCamera();
+void broadcastSensorDataToCamera();
 void receiveMasterCommands();
 void processRearFeedback();
+void receiveRearFeedback(); // Phase 3.1: Receive rear distance with timestamp
 void processCameraFeedback();
 void handleEmergencyStop();
 void logSystemStatus();
@@ -362,8 +365,15 @@ void setupWebServer()
 
 void buildTelemetryPayload(JsonDocument &doc)
 {
+  // Phase 3.3: Calculate distance trending for dashboard
+  static float lastTelemetryDistance = 0.0f;
+  float distanceTrend = lastFrontDistance - lastTelemetryDistance;
+  lastTelemetryDistance = lastFrontDistance;
+
   doc["front_distance"] = lastFrontDistance;
   doc["rear_distance"] = lastRearDistance;
+  doc["front_distance_trend"] = distanceTrend;  // Rate of distance change
+  doc["approaching"] = (distanceTrend < -0.5f); // True if rapidly approaching
   doc["gas"] = gasValue;
   doc["state"] = (int)currentState;
   doc["autonomous"] = autonomousMode;
@@ -468,6 +478,7 @@ void updateFrontController()
   {
     lastNavUpdate = currentTime;
     handleFrontSensors();
+    broadcastSensorDataToCamera();
   }
 
   // ========== SAFETY CHECKS (5Hz) ==========
@@ -525,6 +536,7 @@ void updateFrontController()
   // ========== COMMUNICATION ==========
   receiveMasterCommands();
   processCameraFeedback();
+  receiveRearFeedback(); // Phase 3.1: Receive rear distance with timestamp
 
   // ========== HEARTBEAT (1Hz) ==========
   if (currentTime - lastHeartbeat >= 1000)
@@ -543,8 +555,8 @@ void updateFrontController()
 
 void handleFrontSensors()
 {
-  // Update front ultrasonic distance
-  lastFrontDistance = frontSensor.getAverageDistance(3);
+  // Update front ultrasonic distance using EMA filtering
+  lastFrontDistance = frontSensor.getSmoothedDistance();
 
   // Safety monitoring - feed distance to safety monitor
   // (assumes rear distance available from previous slave update)
@@ -650,15 +662,49 @@ void sendHeartbeatToRear()
 
 void sendHeartbeatToCamera()
 {
-  StaticJsonDocument<300> heartbeat;
+  StaticJsonDocument<512> heartbeat;
   heartbeat["type"] = "heartbeat";
   heartbeat["source"] = "front";
   heartbeat["timestamp"] = millis();
   heartbeat["data"]["uptime"] = millis() / 1000;
   heartbeat["data"]["state"] = (int)currentState;
   heartbeat["data"]["safe"] = safetyMonitor.isSafe();
+  heartbeat["data"]["emergency"] = emergencyStopTriggered;
+  heartbeat["data"]["front_distance"] = lastFrontDistance;
+  heartbeat["data"]["rear_distance"] = lastRearDistance;
+  heartbeat["data"]["obstacle_threshold"] = OBSTACLE_THRESHOLD;
+  heartbeat["data"]["emergency_distance"] = EMERGENCY_STOP_DISTANCE;
+  heartbeat["data"]["gas_level"] = gasValue;
 
   cameraComm.sendMessage(heartbeat);
+}
+
+void broadcastSensorDataToCamera()
+{
+  static unsigned long lastSensorBroadcast = 0;
+  const unsigned long SENSOR_BROADCAST_INTERVAL = 100; // 10Hz
+
+  unsigned long now = millis();
+  if (now - lastSensorBroadcast < SENSOR_BROADCAST_INTERVAL)
+  {
+    return;
+  }
+
+  lastSensorBroadcast = now;
+
+  StaticJsonDocument<300> sensorMsg;
+  sensorMsg["type"] = "sensor_data";
+  sensorMsg["source"] = "front";
+  sensorMsg["timestamp"] = now;
+
+  JsonObject data = sensorMsg.createNestedObject("data");
+  data["front_distance"] = lastFrontDistance;
+  data["rear_distance"] = lastRearDistance;
+  data["obstacle_detected"] = (lastFrontDistance > 0 && lastFrontDistance < OBSTACLE_THRESHOLD);
+  data["emergency_triggered"] = (lastFrontDistance > 0 && lastFrontDistance < EMERGENCY_STOP_DISTANCE);
+  data["gas_level"] = gasValue;
+
+  cameraComm.sendMessage(sensorMsg);
 }
 
 void receiveMasterCommands()
@@ -739,6 +785,25 @@ void processCameraFeedback()
   }
 }
 
+void receiveRearFeedback()
+{
+  // Phase 3.1: Receive rear sensor feedback with timestamp synchronization
+  if (rearComm.available())
+  {
+    StaticJsonDocument<512> rearMsg = rearComm.receiveMessage();
+
+    if (rearMsg["type"] == "sensor_feedback")
+    {
+      lastRearDistance = rearMsg["data"]["rear_distance"].as<float>();
+      lastRearDistanceTime = millis(); // Timestamp when we received it
+
+      DEBUG_PRINT("[FRONT] Rear Distance (synced): ");
+      DEBUG_PRINT(lastRearDistance);
+      DEBUG_PRINTLN(" cm");
+    }
+  }
+}
+
 void handleEmergencyStop()
 {
   DEBUG_PRINTLN("\n⚠️⚠️⚠️ EMERGENCY STOP TRIGGERED ⚠️⚠️⚠️\n");
@@ -790,6 +855,22 @@ void logSystemStatus()
   DEBUG_PRINTLN(safetyMonitor.isSafe() ? "YES" : "NO");
   DEBUG_PRINT("Emergency: ");
   DEBUG_PRINTLN(emergencyStopTriggered ? "YES" : "NO");
+
+  // Sensor health diagnostics
+  auto sensorHealth = frontSensor.getHealthStatus();
+  DEBUG_PRINTLN("\n--- Front Sensor Health ---");
+  DEBUG_PRINT("Total Readings: ");
+  DEBUG_PRINTLN(sensorHealth.totalReadings);
+  DEBUG_PRINT("Valid: ");
+  DEBUG_PRINT(sensorHealth.validReadings);
+  DEBUG_PRINT(" | Invalid: ");
+  DEBUG_PRINTLN(sensorHealth.invalidReadings);
+  DEBUG_PRINT("Availability: ");
+  DEBUG_PRINT(sensorHealth.availabilityPercent);
+  DEBUG_PRINTLN("%");
+  DEBUG_PRINT("Status: ");
+  DEBUG_PRINTLN(sensorHealth.isHealthy ? "HEALTHY" : "DEGRADED");
+
   DEBUG_PRINTLN("============================================\n");
 }
 
@@ -876,8 +957,8 @@ void updateRearController()
 
 void handleRearSensors()
 {
-  // Update rear ultrasonic distance
-  lastRearDistance = rearSensor.getAverageDistance(3);
+  // Update rear ultrasonic distance using EMA filtering
+  lastRearDistance = rearSensor.getSmoothedDistance();
 
   DEBUG_PRINT("[REAR] Rear Distance: ");
   DEBUG_PRINT(lastRearDistance);
@@ -992,6 +1073,22 @@ void logSystemStatus()
   DEBUG_PRINTLN(safetyMonitor.isSafe() ? "YES" : "NO");
   DEBUG_PRINT("Emergency: ");
   DEBUG_PRINTLN(emergencyStopTriggered ? "YES" : "NO");
+
+  // Sensor health diagnostics
+  auto sensorHealth = rearSensor.getHealthStatus();
+  DEBUG_PRINTLN("\n--- Rear Sensor Health ---");
+  DEBUG_PRINT("Total Readings: ");
+  DEBUG_PRINTLN(sensorHealth.totalReadings);
+  DEBUG_PRINT("Valid: ");
+  DEBUG_PRINT(sensorHealth.validReadings);
+  DEBUG_PRINT(" | Invalid: ");
+  DEBUG_PRINTLN(sensorHealth.invalidReadings);
+  DEBUG_PRINT("Availability: ");
+  DEBUG_PRINT(sensorHealth.availabilityPercent);
+  DEBUG_PRINTLN("%");
+  DEBUG_PRINT("Status: ");
+  DEBUG_PRINTLN(sensorHealth.isHealthy ? "HEALTHY" : "DEGRADED");
+
   DEBUG_PRINTLN("==========================================\n");
 }
 

@@ -232,10 +232,23 @@ void SafetyMonitor::raiseAlert(AlertType type, AlertLevel level, const char *mes
 
     if (existingIndex >= 0)
     {
-        // Update existing alert
-        _alerts[existingIndex].level = level;
-        _alerts[existingIndex].timestamp = millis();
-        _alerts[existingIndex].message = String(message);
+        // Phase 3.2: Rate-limit alerts - only re-raise if sufficient time has passed
+        unsigned long timeSinceLastAlert = millis() - _alerts[existingIndex].timestamp;
+        if (timeSinceLastAlert >= 500) // 500ms rate-limit to prevent spam
+        {
+            // Update existing alert after rate-limit period
+            _alerts[existingIndex].level = level;
+            _alerts[existingIndex].timestamp = millis();
+            _alerts[existingIndex].message = String(message);
+
+            DEBUG_PRINT("SAFETY ALERT [");
+            DEBUG_PRINT(getAlertLevelName(level));
+            DEBUG_PRINT("] - ");
+            DEBUG_PRINT(getAlertTypeName(type));
+            DEBUG_PRINT(": ");
+            DEBUG_PRINTLN(message);
+        }
+        // else: suppress re-raise within 500ms window
     }
     else
     {

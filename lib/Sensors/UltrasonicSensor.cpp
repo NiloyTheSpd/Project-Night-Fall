@@ -2,7 +2,8 @@
 #include "UltrasonicSensor.h"
 
 UltrasonicSensor::UltrasonicSensor(uint8_t trigPin, uint8_t echoPin)
-    : _trigPin(trigPin), _echoPin(echoPin), _lastDistance(0), _lastReading(0) {}
+    : _trigPin(trigPin), _echoPin(echoPin), _lastDistance(0), _filteredDistance(0),
+      _lastReading(0), _totalReadings(0), _validReadings(0), _invalidReadings(0) {}
 
 void UltrasonicSensor::begin()
 {
@@ -32,6 +33,8 @@ float UltrasonicSensor::getDistance()
 
 float UltrasonicSensor::measureDistance()
 {
+    _totalReadings++;
+
     // Send trigger pulse
     digitalWrite(_trigPin, LOW);
     delayMicroseconds(2);
@@ -49,9 +52,11 @@ float UltrasonicSensor::measureDistance()
     // Validate reading (HC-SR04 effective range: 2-400cm)
     if (distance < 2.0 || distance > 400.0)
     {
+        _invalidReadings++;
         return _lastDistance; // Return last valid reading if out of range
     }
 
+    _validReadings++;
     return distance;
 }
 
@@ -85,4 +90,33 @@ float UltrasonicSensor::getAverageDistance(uint8_t samples)
     }
 
     return _lastDistance;
+}
+
+float UltrasonicSensor::getSmoothedDistance()
+{
+    float rawDistance = getDistance();
+
+    // EMA filtering: reduces noise while responding to real changes
+    _filteredDistance = (EMA_ALPHA * rawDistance) + ((1.0f - EMA_ALPHA) * _filteredDistance);
+
+    DEBUG_PRINT("[EMA] Raw: ");
+    DEBUG_PRINT(rawDistance);
+    DEBUG_PRINT("cm → Smoothed: ");
+    DEBUG_PRINT(_filteredDistance);
+    DEBUG_PRINTLN("cm");
+
+    return _filteredDistance;
+}
+
+UltrasonicSensor::SensorHealth UltrasonicSensor::getHealthStatus()
+{
+    SensorHealth health;
+    health.totalReadings = _totalReadings;
+    health.validReadings = _validReadings;
+    health.invalidReadings = _invalidReadings;
+    health.availabilityPercent = (_totalReadings > 0) ? (float)_validReadings / _totalReadings * 100.0f : 0.0f;
+    health.lastReadTime = _lastReading;
+    health.isHealthy = (health.availabilityPercent > 95.0f);
+
+    return health;
 }
