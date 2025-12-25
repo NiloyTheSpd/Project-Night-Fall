@@ -24,8 +24,7 @@
 #include <esp_camera.h>
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
-#include <SD.h>
-#include <SPI.h>
+#include <SD_MMC.h>
 
 // ============================================
 // CONFIGURATION
@@ -275,8 +274,8 @@ void initializeCamera()
     config.pin_pwdn = PWDN_GPIO_NUM;
     config.pin_reset = RESET_GPIO_NUM;
     config.pin_xclk = XCLK_GPIO_NUM;
-    config.pin_sscb_sda = SIOD_GPIO_NUM;
-    config.pin_sscb_scl = SIOC_GPIO_NUM;
+    config.pin_sccb_sda = SIOD_GPIO_NUM;
+    config.pin_sccb_scl = SIOC_GPIO_NUM;
 
     // Data pins
     config.pin_d7 = Y9_GPIO_NUM;
@@ -330,9 +329,9 @@ void initializeCamera()
     // Configure sensor for optimal image quality
     DEBUG_PRINTLN("  [CAMERA] Configuring sensor parameters...");
 
-    // Brightness and contrast
-    s->set_brightness(s, 0); // -2 to 2
-    s->set_contrast(s, 0);   // -2 to 2
+    // Brightness and contrast (lift image for low-light)
+    s->set_brightness(s, 1); // -2 to 2
+    s->set_contrast(s, 1);   // -2 to 2
     s->set_saturation(s, 0); // -2 to 2
 
     // Effects and white balance
@@ -343,14 +342,14 @@ void initializeCamera()
 
     // Exposure control
     s->set_exposure_ctrl(s, 1); // Auto exposure
-    s->set_aec2(s, 0);          // AEC2 disabled
-    s->set_ae_level(s, 0);      // -2 to 2
-    s->set_aec_value(s, 300);   // 0 to 1200
+    s->set_aec2(s, 1);          // Enable improved AEC for low-light
+    s->set_ae_level(s, 1);      // -2 to 2 (slightly brighter)
+    s->set_aec_value(s, 600);   // 0 to 1200 (target exposure)
 
     // Gain control
-    s->set_gain_ctrl(s, 1);                  // Auto gain
-    s->set_agc_gain(s, 0);                   // 0 to 30
-    s->set_gainceiling(s, (gainceiling_t)0); // Gain ceiling
+    s->set_gain_ctrl(s, 1);                 // Auto gain
+    s->set_agc_gain(s, 0);                  // Auto controlled when gain_ctrl=1
+    s->set_gainceiling(s, GAINCEILING_32X); // Allow higher gain for low-light
 
     // Image processing
     s->set_bpc(s, 0);     // Black pixel correction
@@ -692,17 +691,14 @@ void initializeSDCard()
 {
 #if SD_CARD_ENABLED
 
-    DEBUG_PRINTLN("  [SD] Initializing SPI bus for SD card...");
+    DEBUG_PRINTLN("  [SD] Mounting SD card (1-bit mode)...");
 
-    // Initialize SPI bus for SD card
-    SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
-
-    DEBUG_PRINTLN("  [SD] Mounting SD card...");
-
-    // Mount SD card
-    if (!SD.begin(SD_CS, SPI, SD_SPI_FREQUENCY))
+    // Mount SD card using SD_MMC in 1-bit mode
+    // true = 1-bit mode (frees pins 4, 12, 13 for other use)
+    // Uses only: CMD=15, CLK=14, DATA0=2
+    if (!SD_MMC.begin("/sdcard", true))
     {
-        DEBUG_PRINTLN("  ❌ SD card initialization failed!");
+        DEBUG_PRINTLN("  ❌ SD card mount failed!");
         sdCardInitialized = false;
         return;
     }
@@ -710,15 +706,15 @@ void initializeSDCard()
     DEBUG_PRINTLN("  [SD] ✓ SD card mounted successfully");
 
     // Check card size
-    uint64_t cardSize = SD.cardSize();
+    uint64_t cardSize = SD_MMC.cardSize();
     DEBUG_PRINT("  [SD] Physical card size: ");
     DEBUG_PRINT(cardSize / (1024 * 1024 * 1024));
     DEBUG_PRINTLN(" GB");
 
     // Check available space
-    uint64_t cardFreeSpace = SD.totalBytes() - SD.usedBytes();
+    uint64_t cardFreeSpace = SD_MMC.totalBytes() - SD_MMC.usedBytes();
     DEBUG_PRINT("  [SD] Total space: ");
-    DEBUG_PRINT(SD.totalBytes() / (1024 * 1024 * 1024));
+    DEBUG_PRINT(SD_MMC.totalBytes() / (1024 * 1024 * 1024));
     DEBUG_PRINTLN(" GB");
 
     DEBUG_PRINT("  [SD] Free space: ");
@@ -730,16 +726,16 @@ void initializeSDCard()
     DEBUG_PRINTLN(" GB");
 
     // Create storage directory if it doesn't exist
-    if (!SD.exists("/storage"))
+    if (!SD_MMC.exists("/storage"))
     {
         DEBUG_PRINTLN("  [SD] Creating /storage directory...");
-        SD.mkdir("/storage");
+        SD_MMC.mkdir("/storage");
     }
 
     sdCardInitialized = true;
     sdCardUsedBytes = 0;
 
-    DEBUG_PRINTLN("  [SD] SD card ready for use (4GB limit enforced)");
+    DEBUG_PRINTLN("  [SD] SD card ready for use (8GB full capacity)");
 
 #else
     DEBUG_PRINTLN("  [SD] SD card support disabled in config");
@@ -755,12 +751,12 @@ void checkSDCardSpace()
         return;
 
     // Get current used space
-    sdCardUsedBytes = SD.usedBytes();
+    sdCardUsedBytes = SD_MMC.usedBytes();
 
-    // Check if approaching 4GB limit
+    // Check if approaching capacity limit
     if (sdCardUsedBytes >= sdCardMaxBytes)
     {
-        DEBUG_PRINTLN("\n⚠️⚠️⚠️ SD CARD: 4GB LIMIT REACHED ⚠️⚠️⚠️");
+        DEBUG_PRINTLN("\n⚠️⚠️⚠️ SD CARD: STORAGE LIMIT REACHED ⚠️⚠️⚠️");
         DEBUG_PRINTLN("Storage full - cannot write more data");
         DEBUG_PRINTLN("Please backup and clear SD card\n");
 
