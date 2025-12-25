@@ -2,15 +2,15 @@
 #include "AutonomousNav.h"
 
 AutonomousNav::AutonomousNav()
-        : _currentState(NAV_FORWARD), _previousState(NAV_FORWARD),
-            _controlMode(CONTROL_CRUISE),
-            _frontDistance(0), _rearDistance(0), _lastFrontDistance(0),
-            _lastFrontUpdateTime(0), _ttcMs(-1.0f),
-            _stateStartTime(0), _lastDecisionTime(0),
-            _stuckCounter(0), _turnDirection(1),
-            _obstacleThreshold(OBSTACLE_THRESHOLD),
-            _clearanceThreshold(OBSTACLE_THRESHOLD + 10.0f),
-            _obstacleState(false) {}
+    : _currentState(NAV_FORWARD), _previousState(NAV_FORWARD),
+      _controlMode(CONTROL_CRUISE),
+      _frontDistance(0), _rearDistance(0), _lastFrontDistance(0),
+      _lastFrontUpdateTime(0), _ttcMs(-1.0f),
+      _stateStartTime(0), _lastDecisionTime(0),
+      _stuckCounter(0), _turnDirection(1),
+      _obstacleThreshold(OBSTACLE_THRESHOLD),
+      _clearanceThreshold(OBSTACLE_THRESHOLD + 10.0f),
+      _obstacleState(false) {}
 
 void AutonomousNav::begin()
 {
