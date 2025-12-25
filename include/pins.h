@@ -96,4 +96,17 @@
 #define PWM_CHANNEL_RR 3
 #define PWM_CHANNEL_BUZZER 4
 
+// On-board status LED definitions
+#ifdef CAMERA_MODULE
+// ESP32-CAM AI-Thinker uses GPIO33 for the on-board LED
+#ifndef LED_BUILTIN
+#define LED_BUILTIN 33
+#endif
+#else
+// Default ESP32 DevKit V1 on-board LED
+#ifndef LED_BUILTIN
+#define LED_BUILTIN 2
+#endif
+#endif
+
 #endif // PINS_H

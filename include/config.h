@@ -9,6 +9,10 @@
 #define WIFI_SSID "ProjectNightfall"
 #define WIFI_PASSWORD "rescue2025"
 #define CAMERA_STREAM_PORT 81
+// Dashboard (front controller) configuration
+#define DASHBOARD_HTTP_PORT 80
+#define DASHBOARD_WS_PATH "/ws"
+#define DASHBOARD_UPDATE_INTERVAL 200 // ms between telemetry pushes
 
 // Communication Settings
 #define UART_BAUD_RATE 115200
