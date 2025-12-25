@@ -42,6 +42,20 @@
 #define STUCK_THRESHOLD 5          // Consecutive blocked readings
 #define ROTATION_360_DURATION 2000 // ms for full 360 rotation
 
+// Advanced Control (scaffolding)
+#define ENABLE_TTC_BRAKING 0            // Guard: 0 disables TTC-based braking logic
+#define TTC_BRAKE_THRESHOLD_MS 800      // Brake if time-to-collision falls below this
+#define REAR_STALE_TIMEOUT_MS 750       // Rear distance considered stale after this
+#define TURN_TIMEOUT_MS (TURN_DURATION) // Max time to stay in a turning state
+
+// PID placeholders (speed control)
+#define SPEED_PID_KP 0.8f
+#define SPEED_PID_KI 0.0f
+#define SPEED_PID_KD 0.0f
+#define SPEED_OUTPUT_MIN 0
+#define SPEED_OUTPUT_MAX 255
+#define SPEED_SLEW_RATE_PER_S 120.0f // Max change in PWM per second
+
 // Safety Settings
 #define EMERGENCY_STOP_DISTANCE 10 // cm for immediate stop
 #define MAX_TILT_ANGLE 45          // degrees max safe tilt
@@ -79,6 +93,14 @@ enum RobotState
     STATE_CLIMBING,
     STATE_TURNING,
     STATE_AVOIDING
+};
+
+// Control Modes (placeholder for future use)
+enum ControlMode
+{
+    CONTROL_CRUISE,
+    CONTROL_APPROACH,
+    CONTROL_ESCAPE
 };
 
 // Movement Commands

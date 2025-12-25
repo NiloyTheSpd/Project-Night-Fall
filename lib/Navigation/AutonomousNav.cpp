@@ -2,19 +2,24 @@
 #include "AutonomousNav.h"
 
 AutonomousNav::AutonomousNav()
-    : _currentState(NAV_FORWARD), _previousState(NAV_FORWARD),
-      _frontDistance(0), _rearDistance(0), _lastFrontDistance(0),
-      _stateStartTime(0), _lastDecisionTime(0),
-      _stuckCounter(0), _turnDirection(1),
-      _obstacleThreshold(OBSTACLE_THRESHOLD),
-      _clearanceThreshold(OBSTACLE_THRESHOLD + 10.0f),
-      _obstacleState(false) {}
+        : _currentState(NAV_FORWARD), _previousState(NAV_FORWARD),
+            _controlMode(CONTROL_CRUISE),
+            _frontDistance(0), _rearDistance(0), _lastFrontDistance(0),
+            _lastFrontUpdateTime(0), _ttcMs(-1.0f),
+            _stateStartTime(0), _lastDecisionTime(0),
+            _stuckCounter(0), _turnDirection(1),
+            _obstacleThreshold(OBSTACLE_THRESHOLD),
+            _clearanceThreshold(OBSTACLE_THRESHOLD + 10.0f),
+            _obstacleState(false) {}
 
 void AutonomousNav::begin()
 {
     _currentState = NAV_FORWARD;
+    _controlMode = CONTROL_CRUISE;
     _stateStartTime = millis();
     _lastDecisionTime = millis();
+    _lastFrontUpdateTime = _lastDecisionTime;
+    _ttcMs = -1.0f;
 
     DEBUG_PRINTLN("Autonomous Navigation initialized");
 }
@@ -24,6 +29,7 @@ void AutonomousNav::updateSensorData(float frontDistance, float rearDistance)
     _lastFrontDistance = _frontDistance;
     _frontDistance = frontDistance;
     _rearDistance = rearDistance;
+    _lastFrontUpdateTime = millis();
 }
 
 MovementCommand AutonomousNav::getNextMove()
@@ -80,6 +86,23 @@ MovementCommand AutonomousNav::getNextMove()
 
 MovementCommand AutonomousNav::handleForward()
 {
+    _controlMode = CONTROL_CRUISE;
+
+    // Optional TTC braking scaffolding (disabled by default)
+#if ENABLE_TTC_BRAKING
+    // Estimate approach speed from distance trend
+    float approachSpeed = estimateApproachSpeedCmS(millis());
+    _ttcMs = ControlUtils::computeTTC(_frontDistance, approachSpeed);
+    if (_ttcMs > 0.0f && _ttcMs < TTC_BRAKE_THRESHOLD_MS)
+    {
+        _controlMode = CONTROL_APPROACH;
+        // Future: reduce speed via PID/ramp; for now, stop briefly
+        return CMD_STOP;
+    }
+#else
+    _ttcMs = -1.0f;
+#endif
+
     // Check for obstacles
     if (isObstacleDetected())
     {
@@ -109,6 +132,7 @@ MovementCommand AutonomousNav::handleForward()
 
 MovementCommand AutonomousNav::handleAvoiding()
 {
+    _controlMode = CONTROL_ESCAPE;
     // Stop momentarily
     if (millis() - _stateStartTime < 500)
     {
@@ -181,6 +205,7 @@ MovementCommand AutonomousNav::handleTurning()
 
 MovementCommand AutonomousNav::handleBackingUp()
 {
+    _controlMode = CONTROL_ESCAPE;
     // Back up for specified duration
     if (millis() - _stateStartTime < BACKUP_DURATION)
     {
@@ -194,6 +219,7 @@ MovementCommand AutonomousNav::handleBackingUp()
 
 MovementCommand AutonomousNav::handleClimbing()
 {
+    _controlMode = CONTROL_APPROACH;
     // Boost front motors for climbing duration
     if (millis() - _stateStartTime < CLIMB_BOOST_DURATION)
     {
@@ -207,6 +233,7 @@ MovementCommand AutonomousNav::handleClimbing()
 
 MovementCommand AutonomousNav::handleStuck()
 {
+    _controlMode = CONTROL_ESCAPE;
     // Perform 360-degree scan
     changeState(NAV_SCANNING);
     return CMD_ROTATE_360;
@@ -337,7 +364,40 @@ void AutonomousNav::reset()
 {
     _currentState = NAV_FORWARD;
     _previousState = NAV_FORWARD;
+    _controlMode = CONTROL_CRUISE;
     _stuckCounter = 0;
     _turnDirection = 1;
     _stateStartTime = millis();
+    _lastFrontUpdateTime = _stateStartTime;
+    _ttcMs = -1.0f;
+}
+
+// === Advanced helpers (scaffolding) ===
+float AutonomousNav::estimateApproachSpeedCmS(unsigned long now)
+{
+    // Estimate speed from distance delta over decision interval
+    unsigned long dt_ms = now - _lastDecisionTime;
+    if (dt_ms == 0)
+        return 0.0f;
+
+    float delta_cm = _lastFrontDistance - _frontDistance; // positive when approaching
+    float speed_cm_s = (delta_cm) * (1000.0f / (float)dt_ms);
+    if (speed_cm_s < 0.0f)
+        return 0.0f; // moving away or stationary
+    return speed_cm_s;
+}
+
+MovementCommand AutonomousNav::microScanWiggle()
+{
+    // Placeholder: small left-right wiggle to probe environment
+    // For now, just stop to avoid unintended motion
+    return CMD_STOP;
+}
+
+bool AutonomousNav::turnUntilClear(unsigned long timeoutMs)
+{
+    // Placeholder: keep turning until obstacle clears or timeout
+    // Not implemented yet; always return false to indicate not cleared
+    (void)timeoutMs;
+    return false;
 }

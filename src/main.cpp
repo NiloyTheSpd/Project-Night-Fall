@@ -381,6 +381,9 @@ void buildTelemetryPayload(JsonDocument &doc)
   doc["gas_trend"] = (gasValue - lastGasValue); // Rate of smoke change
   doc["smoke_emergency"] = (gasValue > 3000);   // Emergency threshold
   doc["smoke_warning"] = (gasValue > 2000);     // Warning threshold
+  // Advanced control telemetry (placeholders)
+  doc["ttc_ms"] = autonomousNav.getTtcMs();
+  doc["control_mode"] = (int)autonomousNav.getControlMode();
   doc["state"] = (int)currentState;
   doc["autonomous"] = autonomousMode;
   doc["emergency"] = emergencyStopTriggered;
