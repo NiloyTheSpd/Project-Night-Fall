@@ -91,7 +91,11 @@ export default function RobotDashboard() {
   const [sensors, setSensors] = useState({
      distanceFront: 0,
      distanceRear: 0,
-     gas: 0,
+     gas_level: 0,           // Raw ADC value (0-4095)
+     gas_detected: false,    // Boolean: gas detected
+     gas_trend: 0,           // Rate of change
+     smoke_warning: false,   // Threshold 2000 PPM
+     smoke_emergency: false, // Threshold 3000 PPM
      temp: 0,
      humidity: 0
   });
@@ -151,7 +155,11 @@ export default function RobotDashboard() {
           setSensors({
             distanceFront: data.front_distance || 0,
             distanceRear: data.rear_distance || 0,
-            gas: data.gas || 0,
+            gas_level: data.gas_level || 0,
+            gas_detected: data.gas_detected || false,
+            gas_trend: data.gas_trend || 0,
+            smoke_warning: data.smoke_warning || false,
+            smoke_emergency: data.smoke_emergency || false,
              temp: data.temperature || 0,
              humidity: data.humidity || 0
           });
@@ -179,7 +187,7 @@ export default function RobotDashboard() {
           setHistory(prev => ({
             battery: prev.battery,
             speed: prev.speed,
-            gas: (data.gas !== undefined) ? [...prev.gas.slice(-20), data.gas] : prev.gas
+            gas: (data.gas_level !== undefined) ? [...prev.gas.slice(-20), data.gas_level] : prev.gas
           }));
           
         } catch (err) {
@@ -544,15 +552,82 @@ export default function RobotDashboard() {
 
               {/* Atmospheric Sensors */}
               <div className="grid grid-cols-2 gap-4">
-                <div className="bg-gray-800/50 p-2 rounded border border-gray-700/50">
-                  <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
-                    <Wind size={12} /> GAS LEVEL
+                {/* SMOKE/GAS SENSOR - Enhanced */}
+                <div className="col-span-2 bg-gray-800/50 p-4 rounded border border-gray-700/50">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2 text-sm text-gray-400 font-mono">
+                      <Wind size={14} /> SMOKE DETECTION
+                    </div>
+                    <span className={`text-xs px-2 py-1 rounded font-bold ${
+                      sensors.smoke_emergency ? 'bg-red-900 text-red-200 animate-pulse' :
+                      sensors.smoke_warning ? 'bg-orange-900 text-orange-200' :
+                      sensors.gas_detected ? 'bg-yellow-900 text-yellow-200' :
+                      'bg-emerald-900 text-emerald-200'
+                    }`}>
+                      {sensors.smoke_emergency ? '🚨 CRITICAL' :
+                       sensors.smoke_warning ? '⚠️ WARNING' :
+                       sensors.gas_detected ? '⚠️ DETECTED' :
+                       '✓ CLEAR'}
+                    </span>
                   </div>
-                  <div className={`text-xl font-mono font-bold ${sensors.gas > 300 ? 'text-red-400 animate-pulse' : 'text-emerald-400'}`}>
-                    {sensors.gas.toFixed(0)}
-                    <span className="text-xs text-gray-500 font-normal ml-1">PPM</span>
+
+                  {/* Gas Level Display */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-2xl font-mono font-bold text-cyan-400">
+                        {sensors.gas_level.toFixed(0)}
+                        <span className="text-xs text-gray-500 ml-2">PPM</span>
+                      </span>
+                      <span className={`text-sm font-mono ${
+                        sensors.gas_trend > 10 ? 'text-red-400' :
+                        sensors.gas_trend > 0 ? 'text-orange-400' :
+                        'text-emerald-400'
+                      }`}>
+                        {sensors.gas_trend > 0 ? '↑ ' : sensors.gas_trend < 0 ? '↓ ' : '→ '}
+                        {Math.abs(sensors.gas_trend).toFixed(1)} PPM
+                      </span>
+                    </div>
+
+                    {/* Visual Progress Bar */}
+                    <div className="space-y-1">
+                      <ProgressBar 
+                        value={Math.min(sensors.gas_level, 4095)} 
+                        max={4095}
+                        color={
+                          sensors.smoke_emergency ? 'bg-red-600' :
+                          sensors.smoke_warning ? 'bg-orange-500' :
+                          sensors.gas_detected ? 'bg-yellow-500' :
+                          'bg-emerald-500'
+                        }
+                        height="h-3"
+                      />
+                      <div className="flex justify-between text-xs text-gray-500">
+                        <span>SAFE</span>
+                        <span>LIGHT</span>
+                        <span>MODERATE</span>
+                        <span>CRITICAL</span>
+                      </div>
+                    </div>
+
+                    {/* Threshold Indicators */}
+                    <div className="grid grid-cols-3 gap-2 text-xs font-mono">
+                      <div className={`p-2 rounded border ${sensors.gas_level > 500 ? 'border-yellow-500 bg-yellow-900/20' : 'border-gray-700 bg-gray-800/30'}`}>
+                        <div className="text-gray-400">Warning</div>
+                        <div className={sensors.gas_level > 2000 ? 'text-yellow-400 font-bold' : 'text-gray-500'}>2000 PPM</div>
+                      </div>
+                      <div className={`p-2 rounded border ${sensors.gas_level > 2000 ? 'border-orange-500 bg-orange-900/20' : 'border-gray-700 bg-gray-800/30'}`}>
+                        <div className="text-gray-400">High</div>
+                        <div className={sensors.gas_level > 3000 ? 'text-orange-400 font-bold' : 'text-gray-500'}>3000 PPM</div>
+                      </div>
+                      <div className={`p-2 rounded border ${sensors.gas_level > 3000 ? 'border-red-500 bg-red-900/20 animate-pulse' : 'border-gray-700 bg-gray-800/30'}`}>
+                        <div className="text-gray-400">Critical</div>
+                        <div className={sensors.smoke_emergency ? 'text-red-400 font-bold' : 'text-gray-500'}>3000+ PPM</div>
+                      </div>
+                    </div>
                   </div>
                 </div>
+
+                {/* Temperature Sensor */}
                 <div className="bg-gray-800/50 p-2 rounded border border-gray-700/50">
                    <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
                     <Thermometer size={12} /> TEMP
@@ -577,10 +652,10 @@ export default function RobotDashboard() {
                </div>
                 <div>
                   <div className="flex justify-between text-xs text-gray-500 mb-1">
-                    <span>GAS SENSOR HISTORY</span>
-                    <span>AVG: {Math.floor(sensors.gas)}</span>
+                    <span>SMOKE LEVEL HISTORY</span>
+                    <span>AVG: {history.gas.length > 0 ? Math.floor(history.gas.reduce((a,b) => a+b) / history.gas.length) : 0} PPM</span>
                   </div>
-                  <Sparkline data={history.gas} color="stroke-yellow-500" />
+                  <Sparkline data={history.gas} color={sensors.smoke_emergency ? "stroke-red-500" : sensors.smoke_warning ? "stroke-orange-500" : "stroke-yellow-500"} />
                </div>
              </div>
           </Card>

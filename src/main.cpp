@@ -75,10 +75,12 @@ float lastFrontDistance = 0.0f;
 float lastRearDistance = 0.0f;
 unsigned long lastRearDistanceTime = 0; // Phase 3.1: Track rear distance timestamp
 int gasValue = 0;
+int lastGasValue = 0; // Track previous value for trending
 unsigned long lastHeartbeat = 0;
 unsigned long lastNavUpdate = 0;
 unsigned long lastGasReading = 0;
 unsigned long lastSafetyCheck = 0;
+unsigned long lastBuzzerAlert = 0; // Track buzzer timing for dynamic feedback
 bool autonomousMode = false;
 bool emergencyStopTriggered = false;
 unsigned long lastTelemetryPush = 0;
@@ -374,7 +376,11 @@ void buildTelemetryPayload(JsonDocument &doc)
   doc["rear_distance"] = lastRearDistance;
   doc["front_distance_trend"] = distanceTrend;  // Rate of distance change
   doc["approaching"] = (distanceTrend < -0.5f); // True if rapidly approaching
-  doc["gas"] = gasValue;
+  doc["gas_level"] = gasValue;
+  doc["gas_detected"] = (gasValue > GAS_THRESHOLD_ANALOG);
+  doc["gas_trend"] = (gasValue - lastGasValue); // Rate of smoke change
+  doc["smoke_emergency"] = (gasValue > 3000);   // Emergency threshold
+  doc["smoke_warning"] = (gasValue > 2000);     // Warning threshold
   doc["state"] = (int)currentState;
   doc["autonomous"] = autonomousMode;
   doc["emergency"] = emergencyStopTriggered;
@@ -521,15 +527,50 @@ void updateFrontController()
   {
     lastGasReading = currentTime;
     gasSensor.update();
+    lastGasValue = gasValue;
     gasValue = gasSensor.getAnalogValue();
 
-    if (gasSensor.isDetected())
+    // Dynamic buzzer feedback based on smoke level
+    // Map gas value to frequency: 0-500ppm = 800-1500Hz, 500-2000ppm = 1500-3000Hz
+    if (gasValue > GAS_THRESHOLD_ANALOG)
     {
-      DEBUG_PRINT("[FRONT] ⚠️ GAS DETECTED: ");
-      DEBUG_PRINTLN(gasValue);
-      buzzerAlert(1500, 200);
-      safetyMonitor.raiseAlert(ALERT_GAS_DETECTED, ALERT_CRITICAL,
-                               "Hazardous gas detected");
+      // Proportional frequency based on gas concentration
+      int baseFreq = 800;
+      int maxFreq = 3500;
+      int frequency = baseFreq + ((gasValue / 4095.0) * (maxFreq - baseFreq));
+
+      // Alert categorization
+      if (gasValue > 3000) // EMERGENCY: Heavy smoke
+      {
+        // Continuous rapid buzzing (50ms beep, 50ms silence)
+        buzzerAlert(frequency, 50);
+        safetyMonitor.raiseAlert(ALERT_GAS_DETECTED, ALERT_CRITICAL,
+                                 "CRITICAL: Heavy smoke detected!");
+        DEBUG_PRINT("[FRONT] 🚨 CRITICAL GAS LEVEL: ");
+        DEBUG_PRINTLN(gasValue);
+      }
+      else if (gasValue > 2000) // WARNING: Significant smoke
+      {
+        // Pulsing pattern (100ms beep, 200ms silence)
+        buzzerAlert(frequency, 100);
+        safetyMonitor.raiseAlert(ALERT_GAS_DETECTED, ALERT_WARNING,
+                                 "Warning: Moderate smoke detected");
+        DEBUG_PRINT("[FRONT] ⚠️ WARNING GAS LEVEL: ");
+        DEBUG_PRINTLN(gasValue);
+      }
+      else // NOTICE: Light smoke
+      {
+        // Light beeping (70ms beep, 300ms silence)
+        buzzerAlert(frequency, 70);
+        DEBUG_PRINT("[FRONT] ℹ️ SMOKE DETECTED: ");
+        DEBUG_PRINTLN(gasValue);
+      }
+    }
+    else if (gasSensor.isDetected())
+    {
+      // Digital sensor detected but below threshold
+      buzzerAlert(1200, 150);
+      DEBUG_PRINTLN("[FRONT] ℹ️ Smoke sensor triggered (low level)");
     }
   }
 
@@ -1116,17 +1157,24 @@ void resetWatchdog()
 
 void buzzerAlert(int frequency, int duration)
 {
-  // Simple buzzer control - configurable tone and duration
-  // Actual implementation depends on buzzer connection
+  // Dynamic buzzer control - frequency proportional to smoke level
+  // Validates frequency to safe range (800Hz - 4000Hz for typical buzzers)
+  if (frequency < 800)
+    frequency = 800;
+  if (frequency > 4000)
+    frequency = 4000;
+
   pinMode(BUZZER_PIN, OUTPUT);
 
   unsigned long endTime = millis() + duration;
+  unsigned long halfPeriod = 500000 / frequency; // Period in microseconds
+
   while (millis() < endTime)
   {
     digitalWrite(BUZZER_PIN, HIGH);
-    delayMicroseconds(500000 / frequency);
+    delayMicroseconds(halfPeriod);
     digitalWrite(BUZZER_PIN, LOW);
-    delayMicroseconds(500000 / frequency);
+    delayMicroseconds(halfPeriod);
   }
 
   digitalWrite(BUZZER_PIN, LOW);
