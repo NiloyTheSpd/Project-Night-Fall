@@ -24,6 +24,8 @@
 #include <esp_camera.h>
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
+#include <SD.h>
+#include <SPI.h>
 
 // ============================================
 // CONFIGURATION
@@ -71,11 +73,17 @@ bool cameraInitialized = false;
 bool wifiConnected = false;
 bool streaming = false;
 
+// SD Card state
+bool sdCardInitialized = false;
+uint64_t sdCardUsedBytes = 0;
+uint64_t sdCardMaxBytes = SD_MAX_SIZE_BYTES;
+
 // Timing and monitoring
 unsigned long lastHeartbeat = 0;
 unsigned long lastFrameTime = 0;
 unsigned long lastFPS = 0;
 unsigned long cameraInitTime = 0;
+unsigned long lastSDCheck = 0;
 int frameCount = 0;
 int fpsCounter = 0;
 
@@ -105,6 +113,8 @@ struct CameraStatus
 // ============================================
 
 void initializeCamera();
+void initializeSDCard();
+void checkSDCardSpace();
 void initializeWiFi();
 void handleCameraStream();
 void sendStatusUpdate();
@@ -154,6 +164,10 @@ void setup()
             delay(200);
         }
     }
+
+    // Initialize SD Card
+    DEBUG_PRINTLN(">>> Initializing microSD Card...");
+    initializeSDCard();
 
     // Initialize WiFi AP
     DEBUG_PRINTLN(">>> Initializing WiFi Access Point...");
@@ -207,8 +221,18 @@ void loop()
     // Receive and process commands from master
     receiveCommands();
 
-    // Send status updates (5Hz)
+    // Check SD card space (every 5 seconds)
     unsigned long currentTime = millis();
+    if (currentTime - lastSDCheck >= 5000)
+    {
+        lastSDCheck = currentTime;
+        if (sdCardInitialized)
+        {
+            checkSDCardSpace();
+        }
+    }
+
+    // Send status updates (5Hz)
     if (currentTime - lastHeartbeat >= 200)
     {
         lastHeartbeat = currentTime;
@@ -335,7 +359,7 @@ void initializeCamera()
     s->set_lenc(s, 1);    // Lens distortion correction
 
     // Flip and mirror
-    s->set_hmirror(s, 0); // Horizontal mirror
+    s->set_hmirror(s, 1); // Horizontal mirror (1 = flip to fix mirrored image)
     s->set_vflip(s, 0);   // Vertical flip
 
     // Quality
@@ -659,4 +683,111 @@ void logCameraStatus()
         DEBUG_PRINTLN("%");
     }
     DEBUG_PRINTLN("==========================================\n");
+}
+// ============================================
+// SD CARD MANAGEMENT
+// ============================================
+
+void initializeSDCard()
+{
+#if SD_CARD_ENABLED
+
+    DEBUG_PRINTLN("  [SD] Initializing SPI bus for SD card...");
+
+    // Initialize SPI bus for SD card
+    SPI.begin(SD_CLK, SD_MISO, SD_MOSI, SD_CS);
+
+    DEBUG_PRINTLN("  [SD] Mounting SD card...");
+
+    // Mount SD card
+    if (!SD.begin(SD_CS, SPI, SD_SPI_FREQUENCY))
+    {
+        DEBUG_PRINTLN("  ❌ SD card initialization failed!");
+        sdCardInitialized = false;
+        return;
+    }
+
+    DEBUG_PRINTLN("  [SD] ✓ SD card mounted successfully");
+
+    // Check card size
+    uint64_t cardSize = SD.cardSize();
+    DEBUG_PRINT("  [SD] Physical card size: ");
+    DEBUG_PRINT(cardSize / (1024 * 1024 * 1024));
+    DEBUG_PRINTLN(" GB");
+
+    // Check available space
+    uint64_t cardFreeSpace = SD.totalBytes() - SD.usedBytes();
+    DEBUG_PRINT("  [SD] Total space: ");
+    DEBUG_PRINT(SD.totalBytes() / (1024 * 1024 * 1024));
+    DEBUG_PRINTLN(" GB");
+
+    DEBUG_PRINT("  [SD] Free space: ");
+    DEBUG_PRINT(cardFreeSpace / (1024 * 1024 * 1024));
+    DEBUG_PRINTLN(" GB");
+
+    DEBUG_PRINT("  [SD] Usable limit set to: ");
+    DEBUG_PRINT(SD_MAX_SIZE_GB);
+    DEBUG_PRINTLN(" GB");
+
+    // Create storage directory if it doesn't exist
+    if (!SD.exists("/storage"))
+    {
+        DEBUG_PRINTLN("  [SD] Creating /storage directory...");
+        SD.mkdir("/storage");
+    }
+
+    sdCardInitialized = true;
+    sdCardUsedBytes = 0;
+
+    DEBUG_PRINTLN("  [SD] SD card ready for use (4GB limit enforced)");
+
+#else
+    DEBUG_PRINTLN("  [SD] SD card support disabled in config");
+    sdCardInitialized = false;
+#endif
+}
+
+void checkSDCardSpace()
+{
+#if SD_CARD_ENABLED
+
+    if (!sdCardInitialized)
+        return;
+
+    // Get current used space
+    sdCardUsedBytes = SD.usedBytes();
+
+    // Check if approaching 4GB limit
+    if (sdCardUsedBytes >= sdCardMaxBytes)
+    {
+        DEBUG_PRINTLN("\n⚠️⚠️⚠️ SD CARD: 4GB LIMIT REACHED ⚠️⚠️⚠️");
+        DEBUG_PRINTLN("Storage full - cannot write more data");
+        DEBUG_PRINTLN("Please backup and clear SD card\n");
+
+        // Send alert to master controller
+        StaticJsonDocument<256> alert;
+        alert["type"] = "alert";
+        alert["source"] = "camera";
+        alert["timestamp"] = millis();
+        alert["data"]["alert_type"] = "storage_full";
+        alert["data"]["used_bytes"] = sdCardUsedBytes;
+        alert["data"]["max_bytes"] = sdCardMaxBytes;
+
+        String output;
+        serializeJson(alert, output);
+        masterSerial.println(output);
+
+        return;
+    }
+
+    // Check if 80% full
+    if (sdCardUsedBytes >= (sdCardMaxBytes * 0.8))
+    {
+        float percentUsed = (float)sdCardUsedBytes / sdCardMaxBytes * 100;
+        DEBUG_PRINT("[SD] ⚠️ Storage warning: ");
+        DEBUG_PRINT(percentUsed);
+        DEBUG_PRINTLN("% full");
+    }
+
+#endif
 }

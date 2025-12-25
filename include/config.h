@@ -53,6 +53,13 @@
 #define CAMERA_JPEG_QUALITY 12          // 0-63, lower = higher quality
 #define CAMERA_FB_COUNT 1               // Frame buffers
 
+// microSD Card Settings
+#define SD_CARD_ENABLED 0                            // Enable SD card support (DISABLED for testing)
+#define SD_MAX_SIZE_GB 4                             // Max usable storage: 4GB
+#define SD_MAX_SIZE_BYTES (4UL * 1024 * 1024 * 1024) // 4GB in bytes
+#define SD_MOUNT_POINT "/sdcard"                     // Mount point for SD card
+#define SD_SPI_FREQUENCY 10000000                    // 10 MHz SPI clock
+
 // Debug Settings
 #ifdef SERIAL_DEBUG
 #define DEBUG_PRINT(x) Serial.print(x)

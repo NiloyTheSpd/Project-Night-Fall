@@ -64,6 +64,12 @@
 
 #define FLASH_LED 4 // Flash LED control
 
+// microSD Card (SPI Mode)
+#define SD_CS 13   // Chip Select (GPIO 13)
+#define SD_MOSI 2  // SPI MOSI (GPIO 2)
+#define SD_MISO 16 // SPI MISO (GPIO 16)
+#define SD_CLK 17  // SPI CLK  (GPIO 17)
+
 // UART Communication
 #define UART_MASTER_TX 14 // To ESP32 #1
 #define UART_MASTER_RX 15 // From ESP32 #1
