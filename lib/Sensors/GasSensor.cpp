@@ -20,13 +20,15 @@ void GasSensor::begin()
     pinMode(_digitalPin, INPUT);
 
     DEBUG_PRINTLN("Gas sensor initializing...");
-    DEBUG_PRINTLN("Pre-heating sensor (60 seconds recommended)");
+    DEBUG_PRINTLN("Sensor warming up (passive, no blocking)");
 
-    // Initial warm-up delay
-    delay(5000);
-
-    // Establish baseline
-    calibrate();
+    // Set baseline to average of first few reads
+    long sum = 0;
+    for (int i = 0; i < 5; i++)
+    {
+        sum += analogRead(_analogPin);
+    }
+    _baseline = sum / 5;
 
     DEBUG_PRINTLN("Gas sensor ready");
 }

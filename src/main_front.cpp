@@ -43,6 +43,11 @@ float lastRearDistance = 0.0f;
 int gasValue = 0;
 bool autonomousMode = false;
 bool emergencyStopTriggered = false;
+bool cameraConnected = false;
+unsigned long lastCameraHeartbeat = 0;
+int cameraFPS = 0;
+bool rearConnected = false;
+unsigned long lastRearHeartbeat = 0;
 
 // Timing
 unsigned long lastHeartbeat = 0;
@@ -108,6 +113,9 @@ static void buildTelemetryPayload(JsonDocument &doc)
     doc["wifi_ip"] = apIP.toString();
     String streamUrl = String("http://") + apIP.toString() + ":" + CAMERA_STREAM_PORT + "/stream";
     doc["stream_url"] = streamUrl;
+    doc["camera_connected"] = cameraConnected && (millis() - lastCameraHeartbeat < 3000);
+    doc["camera_fps"] = cameraFPS;
+    doc["rear_connected"] = rearConnected && (millis() - lastRearHeartbeat < 3000);
 }
 
 static void handleWebCommand(const char *cmd)
@@ -206,10 +214,146 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsE
     }
 }
 
+static const char DASHBOARD_HTML[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Nightfall - Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #1a1a1a; color: #fff; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { text-align: center; margin-bottom: 20px; color: #00ff00; }
+        .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
+        .status-box { background: #2a2a2a; padding: 15px; border: 2px solid #00ff00; border-radius: 5px; }
+        .status-label { font-size: 12px; color: #aaa; text-transform: uppercase; }
+        .status-value { font-size: 24px; font-weight: bold; color: #00ff00; margin-top: 5px; }
+        .controls { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+        button { padding: 15px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        button { background: #004400; color: #00ff00; border: 2px solid #00ff00; }
+        button:hover { background: #00ff00; color: #000; }
+        button:active { transform: scale(0.95); }
+        .emergency { grid-column: 1 / -1; background: #660000; border-color: #ff0000; color: #ff0000; }
+        .emergency:hover { background: #ff0000; color: #fff; }
+        .auto-toggle { grid-column: 1 / -1; background: #000066; border-color: #0099ff; color: #0099ff; }
+        .auto-toggle:hover { background: #0099ff; color: #000; }
+        .auto-toggle.active { background: #0099ff; color: #000; }
+        .video { text-align: center; margin: 20px 0; }
+        img { max-width: 100%; border: 2px solid #00ff00; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 PROJECT NIGHTFALL</h1>
+        
+        <div class="status-grid">
+            <div class="status-box">
+                <div class="status-label">Front Distance</div>
+                <div class="status-value" id="frontDist">-- cm</div>
+            </div>
+            <div class="status-box">
+                <div class="status-label">Gas Level</div>
+                <div class="status-value" id="gasLevel">-- ppm</div>
+            </div>
+            <div class="status-box">
+                <div class="status-label">State</div>
+                <div class="status-value" id="state">INIT</div>
+            </div>
+            <div class="status-box">
+                <div class="status-label">Uptime</div>
+                <div class="status-value" id="uptime">0s</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button onclick="cmd('left')">⬅ LEFT</button>
+            <button onclick="cmd('forward')">⬆ FORWARD</button>
+            <button onclick="cmd('right')">➡ RIGHT</button>
+            
+            <button onclick="cmd('stop')" style="grid-column: 1 / -1;">⏹ STOP</button>
+            
+            <button onclick="cmd('backward')">⬇ BACKWARD</button>
+            <button onclick="cmd('rotate_360')">🔄 ROTATE</button>
+            <button onclick="cmd('left')" style="grid-column: 1 / -1;">Back</button>
+            
+            <button class="auto-toggle" id="autoBtn" onclick="toggleAuto()">🔴 AUTONOMOUS: OFF</button>
+            <button class="emergency" onclick="cmd('estop')">🛑 EMERGENCY STOP</button>
+        </div>
+
+        <div class="video">
+            <h3 style="margin-bottom: 10px; color: #00ff00;">📷 Camera Feed</h3>
+            <img src="http://192.168.4.1:81/stream" alt="Camera Stream" style="width: 100%; max-width: 500px;">
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let autoMode = false;
+
+        function initWS() {
+            ws = new WebSocket('ws://192.168.4.1/ws');
+            ws.onmessage = (e) => {
+                try {
+                    const data = JSON.parse(e.data);
+                    updateUI(data);
+                } catch (err) {
+                    console.error('Parse error:', err);
+                }
+            };
+            ws.onerror = () => { setTimeout(initWS, 2000); };
+            ws.onclose = () => { setTimeout(initWS, 2000); };
+        }
+
+        function updateUI(data) {
+            document.getElementById('frontDist').textContent = data.front_distance ? data.front_distance.toFixed(1) + ' cm' : '-- cm';
+            document.getElementById('gasLevel').textContent = data.gas || '0';
+            const states = ['INIT', 'IDLE', 'AUTO', 'MANUAL', 'EMG', 'CLIMB', 'TURN', 'AVOID'];
+            document.getElementById('state').textContent = states[data.state] || 'UNKNOWN';
+            document.getElementById('uptime').textContent = (data.uptime_ms / 1000).toFixed(0) + 's';
+            
+            autoMode = data.autonomous;
+            const btn = document.getElementById('autoBtn');
+            if (autoMode) {
+                btn.classList.add('active');
+                btn.textContent = '🟢 AUTONOMOUS: ON';
+            } else {
+                btn.classList.remove('active');
+                btn.textContent = '🔴 AUTONOMOUS: OFF';
+            }
+        }
+
+        function cmd(action) {
+            fetch('http://192.168.4.1/api/command', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cmd: action })
+            }).catch(e => console.error(e));
+        }
+
+        function toggleAuto() {
+            cmd(autoMode ? 'autonomous_off' : 'autonomous_on');
+        }
+
+        initWS();
+    </script>
+</body>
+</html>
+)rawliteral";
+
 static void setupWebServer()
 {
+    // Enable CORS for React dashboard
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "Content-Type");
+
     ws.onEvent(onWsEvent);
     webServer.addHandler(&ws);
+
+    webServer.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
+                 { request->send(200, "text/html", DASHBOARD_HTML); });
 
     webServer.on("/api/telemetry", HTTP_GET, [](AsyncWebServerRequest *request)
                  {
@@ -336,7 +480,54 @@ static void receiveMasterCommands()
 
 static void processCameraFeedback()
 {
-    // Stub: If camera sends status over UART, update lastRearDistance or FPS
+    StaticJsonDocument<512> doc = cameraComm.receiveMessage();
+    if (doc.size() == 0)
+        return;
+
+    const char *type = doc["type"] | "";
+    const char *source = doc["source"] | "";
+
+    if (strcmp(source, "camera") != 0)
+        return;
+
+    if (strcmp(type, "status") == 0)
+    {
+        JsonVariant data = doc["data"];
+        cameraFPS = data["fps"] | cameraFPS;
+        cameraConnected = data["wifi_connected"] | cameraConnected;
+        lastCameraHeartbeat = millis();
+        return;
+    }
+    if (strcmp(type, "heartbeat_ack") == 0)
+    {
+        JsonVariant data = doc["data"];
+        cameraFPS = data["fps"] | cameraFPS;
+        cameraConnected = true;
+        lastCameraHeartbeat = millis();
+        return;
+    }
+}
+
+static void processRearFeedback()
+{
+    // Receive rear sensor updates over UART and update cached values
+    StaticJsonDocument<512> doc = rearComm.receiveMessage();
+    if (doc.size() == 0)
+        return;
+
+    const char *type = doc["type"] | "";
+    const char *source = doc["source"] | "";
+    if (strcmp(type, "sensor_update") == 0 && strcmp(source, "rear") == 0)
+    {
+        // Expected format: { type: "sensor_update", source: "rear", data: { rear_distance: <float>, robot_state: <int> } }
+        JsonVariant data = doc["data"];
+        if (!data.isNull())
+        {
+            lastRearDistance = data["rear_distance"] | lastRearDistance;
+            rearConnected = true;
+            lastRearHeartbeat = millis();
+        }
+    }
 }
 
 static void sendHeartbeatToRear()
@@ -456,6 +647,7 @@ void loop()
 
     // Comm
     receiveMasterCommands();
+    processRearFeedback();
     processCameraFeedback();
 
     // Heartbeat @ 1Hz

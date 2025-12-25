@@ -19,7 +19,7 @@ public:
     void turnRight(uint8_t speed = MOTOR_TURN_SPEED);
     void rotate360(bool clockwise = true);
     void stop();
-    void boostFront(uint8_t duration = CLIMB_BOOST_DURATION);
+    void boostFront(uint16_t duration = CLIMB_BOOST_DURATION);
 
     bool isMoving();
     void emergencyStop();

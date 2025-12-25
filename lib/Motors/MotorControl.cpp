@@ -140,7 +140,7 @@ void MotorControl::stop()
     DEBUG_PRINTLN("Motors Stopped");
 }
 
-void MotorControl::boostFront(uint8_t duration)
+void MotorControl::boostFront(uint16_t duration)
 {
     DEBUG_PRINTLN("Front Boost Activated for Climbing");
     forward(MOTOR_CLIMB_SPEED);
