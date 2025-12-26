@@ -28,7 +28,14 @@
 #define ULTRASONIC_THRESHOLD_CLIFF 10    // cm - cliff/climbable edge
 
 #define GAS_THRESHOLD_ALERT 400     // Analog value threshold (0-4095)
+#define GAS_THRESHOLD_ANALOG 350    // Gas sensor baseline (0-4095) for SafetyMonitor
 #define GAS_THRESHOLD_EMERGENCY 500 // Emergency threshold
+
+// Safety Thresholds (Required by SafetyMonitor)
+#define SAFE_DISTANCE 30.0           // cm - safe operating distance
+#define EMERGENCY_STOP_DISTANCE 15.0 // cm - emergency halt trigger
+#define LOW_BATTERY_VOLTAGE 10.5     // volts (12V system, 10.5V = 87.5%)
+#define MAX_TILT_ANGLE 45.0          // degrees from horizontal (reserved for IMU)
 
 // Safety & Navigation
 #define ENABLE_AUTONOMOUS 1               // Toggle autonomous mode
@@ -41,8 +48,9 @@
 #define BUZZER_ALERT_DURATION_MS 100 // ms per alert pulse
 
 // Watchdog & Timing
-#define MAIN_LOOP_RATE_MS 50 // Main loop target frequency (20 Hz)
-#define WATCHDOG_TIMEOUT_MS 5000
+#define MAIN_LOOP_RATE_MS 50                 // Main loop target frequency (20 Hz)
+#define WATCHDOG_TIMEOUT_MS 5000             // ms - communication timeout
+#define WATCHDOG_TIMEOUT WATCHDOG_TIMEOUT_MS // Alias for SafetyMonitor compatibility
 
 // Debug Settings
 #define ENABLE_SERIAL_DEBUG 1
