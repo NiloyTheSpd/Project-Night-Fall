@@ -2,87 +2,65 @@
 #define CONFIG_H
 
 // ============================================
-// GLOBAL CONFIGURATION
+// PROJECT NIGHTFALL - REFACTORED CONFIG
 // ============================================
 
-// Network Configuration
+// WiFi Configuration
 #define WIFI_SSID "ProjectNightfall"
 #define WIFI_PASSWORD "rescue2025"
-#define CAMERA_STREAM_PORT 81
-// Dashboard (front controller) configuration
-#define DASHBOARD_HTTP_PORT 80
-#define DASHBOARD_WS_PATH "/ws"
-#define DASHBOARD_UPDATE_INTERVAL 200 // ms between telemetry pushes
+#define WIFI_SERVER_PORT 8888
+#define WIFI_CAMERA_PORT 81
 
-// Communication Settings
-#define UART_BAUD_RATE 115200
-#define COMM_UPDATE_RATE 50     // ms between updates
-#define HEARTBEAT_INTERVAL 1000 // ms between heartbeats
+// Serial Configuration
+#define SERIAL_BAUD_RATE 115200
 
 // Motor Settings
-#define MOTOR_PWM_FREQ 5000       // Hz
-#define MOTOR_PWM_RESOLUTION 8    // 8-bit (0-255)
-#define MOTOR_NORMAL_SPEED 180    // Normal cruising speed
-#define MOTOR_CLIMB_SPEED 255     // Maximum climbing speed
-#define MOTOR_TURN_SPEED 150      // Speed during turns
-#define CLIMB_BOOST_DURATION 2000 // ms to boost during climb
+#define MOTOR_PWM_FREQ 5000         // Hz
+#define MOTOR_PWM_RESOLUTION 8      // 8-bit (0-255)
+#define MOTOR_NORMAL_SPEED 180      // Normal cruising speed
+#define MOTOR_CLIMB_SPEED 255       // Maximum climbing speed
+#define MOTOR_TURN_SPEED 150        // Speed during turns
+#define MOTOR_BACK_NORMAL_SPEED 150 // Rear motor default speed
 
 // Sensor Settings
-#define ULTRASONIC_TIMEOUT 30000  // microseconds
-#define SAFE_DISTANCE 20          // cm minimum safe distance
-#define OBSTACLE_THRESHOLD 30     // cm to trigger avoidance
-#define CLIMB_DETECT_THRESHOLD 10 // cm sudden drop indicating obstacle
+#define ULTRASONIC_THRESHOLD_SAFE 30     // cm - safe distance
+#define ULTRASONIC_THRESHOLD_OBSTACLE 20 // cm - obstacle detected
+#define ULTRASONIC_THRESHOLD_CLIFF 10    // cm - cliff/climbable edge
 
-#define GAS_THRESHOLD_ANALOG 400 // Analog threshold for gas detection
-#define GAS_SAMPLE_INTERVAL 500  // ms between gas readings
+#define GAS_THRESHOLD_ALERT 400     // Analog value threshold (0-4095)
+#define GAS_THRESHOLD_EMERGENCY 500 // Emergency threshold
 
-// Navigation Settings
-#define TURN_DURATION 500          // ms for 90-degree turn
-#define BACKUP_DURATION 1000       // ms to backup when stuck
-#define STUCK_THRESHOLD 5          // Consecutive blocked readings
-#define ROTATION_360_DURATION 2000 // ms for full 360 rotation
+// Safety & Navigation
+#define ENABLE_AUTONOMOUS 1               // Toggle autonomous mode
+#define NAVIGATION_UPDATE_INTERVAL_MS 200 // ms between nav updates
+#define SENSOR_UPDATE_INTERVAL_MS 100     // ms between sensor reads
+#define TELEMETRY_INTERVAL_MS 500         // ms between telemetry broadcasts
 
-// Advanced Control (scaffolding)
-#define ENABLE_TTC_BRAKING 0            // Guard: 0 disables TTC-based braking logic
-#define TTC_BRAKE_THRESHOLD_MS 800      // Brake if time-to-collision falls below this
-#define REAR_STALE_TIMEOUT_MS 750       // Rear distance considered stale after this
-#define TURN_TIMEOUT_MS (TURN_DURATION) // Max time to stay in a turning state
+// Buzzer Settings
+#define BUZZER_FREQUENCY 2000        // Hz
+#define BUZZER_ALERT_DURATION_MS 100 // ms per alert pulse
 
-// PID placeholders (speed control)
-#define SPEED_PID_KP 0.8f
-#define SPEED_PID_KI 0.0f
-#define SPEED_PID_KD 0.0f
-#define SPEED_OUTPUT_MIN 0
-#define SPEED_OUTPUT_MAX 255
-#define SPEED_SLEW_RATE_PER_S 120.0f // Max change in PWM per second
-
-// Safety Settings
-#define EMERGENCY_STOP_DISTANCE 10 // cm for immediate stop
-#define MAX_TILT_ANGLE 45          // degrees max safe tilt
-#define LOW_BATTERY_VOLTAGE 12.0   // V threshold for low battery
-#define WATCHDOG_TIMEOUT 5000      // ms before watchdog reset
-
-// Camera Settings
-#define CAMERA_FRAME_SIZE FRAMESIZE_VGA // 640x480
-#define CAMERA_JPEG_QUALITY 12          // 0-63, lower = higher quality
-#define CAMERA_FB_COUNT 1               // Frame buffers
-
-// microSD Card Settings
-#define SD_CARD_ENABLED 1                            // Enable SD card support (SD_MMC 1-bit mode)
-#define SD_MAX_SIZE_GB 8                             // Max usable storage: 8GB
-#define SD_MAX_SIZE_BYTES (8UL * 1024 * 1024 * 1024) // 8GB in bytes
-#define SD_MOUNT_POINT "/sdcard"                     // Mount point for SD card
+// Watchdog & Timing
+#define MAIN_LOOP_RATE_MS 50 // Main loop target frequency (20 Hz)
+#define WATCHDOG_TIMEOUT_MS 5000
 
 // Debug Settings
-#ifdef SERIAL_DEBUG
+#define ENABLE_SERIAL_DEBUG 1
+
+#if ENABLE_SERIAL_DEBUG
 #define DEBUG_PRINT(x) Serial.print(x)
 #define DEBUG_PRINTLN(x) Serial.println(x)
+#define DEBUG_PRINTF(fmt, ...) Serial.printf(fmt, ##__VA_ARGS__)
 #else
 #define DEBUG_PRINT(x)
 #define DEBUG_PRINTLN(x)
+#define DEBUG_PRINTF(fmt, ...)
 #endif
 
-// System States
+// ============================================
+// STATE ENUMS
+// ============================================
+
 enum RobotState
 {
     STATE_INIT,
@@ -90,29 +68,19 @@ enum RobotState
     STATE_AUTONOMOUS,
     STATE_MANUAL,
     STATE_EMERGENCY,
-    STATE_CLIMBING,
-    STATE_TURNING,
-    STATE_AVOIDING
+    STATE_ERROR
 };
 
-// Control Modes (placeholder for future use)
-enum ControlMode
+enum NavigationState
 {
-    CONTROL_CRUISE,
-    CONTROL_APPROACH,
-    CONTROL_ESCAPE
-};
-
-// Movement Commands
-enum MovementCommand
-{
-    CMD_STOP,
-    CMD_FORWARD,
-    CMD_BACKWARD,
-    CMD_TURN_LEFT,
-    CMD_TURN_RIGHT,
-    CMD_ROTATE_360,
-    CMD_CLIMB_BOOST
+    NAV_FORWARD,
+    NAV_OBSTACLE_DETECTED,
+    NAV_AVOID_LEFT,
+    NAV_AVOID_RIGHT,
+    NAV_BACKING_UP,
+    NAV_CLIMBING,
+    NAV_STUCK,
+    NAV_IDLE
 };
 
 #endif // CONFIG_H

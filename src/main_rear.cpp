@@ -1,227 +1,424 @@
 /**
- * Project Nightfall - Rear Controller (ESP32 #2)
- * Listens for motor commands from Front via UART and reports rear telemetry.
- * No WiFi/AP enabled here to avoid AP conflicts; data is proxied by Front.
+ * Project Nightfall - Back ESP32 (Master Brain)
+ *
+ * Responsibilities:
+ * - Sensor acquisition (2x ultrasonic, gas sensor)
+ * - Safety monitoring & hazard detection
+ * - Obstacle avoidance & auto-climb logic
+ * - Autonomous navigation
+ * - Rear motor control (L298N direct)
+ * - Front motor command distribution
+ * - Telemetry broadcast
+ * - WiFi server (coordinator)
  */
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <WiFi.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
 #include <esp_task_wdt.h>
 
-#ifndef REAR_CONTROLLER
-#define REAR_CONTROLLER 1
-#endif
+#define BACK_CONTROLLER
 #include "config.h"
 #include "pins.h"
 
-#include "MotorControl.h"
+#include "L298N.h"
 #include "UltrasonicSensor.h"
-#include "SafetyMonitor.h"
-#include "UARTComm.h"
+#include "MQ2Sensor.h"
+#include "WiFiManager.h"
+#include "MessageProtocol.h"
 
-// Rear controller objects
-MotorControl rearMotors(
-    MOTOR_RL_ENA, MOTOR_RL_IN1, MOTOR_RL_IN2,
-    MOTOR_RR_ENB, MOTOR_RR_IN3, MOTOR_RR_IN4,
-    PWM_CHANNEL_RL, PWM_CHANNEL_RR);
+// ============================================
+// GLOBAL OBJECTS
+// ============================================
 
-UltrasonicSensor rearSensor(US_REAR_TRIG, US_REAR_ECHO);
-SafetyMonitor safetyMonitor;
-UARTComm masterComm(Serial1, UART_BAUD_RATE);
+// Motors
+L298N rearMotors(
+    MOTOR_REAR_LEFT_ENA, MOTOR_REAR_LEFT_IN1, MOTOR_REAR_LEFT_IN2,
+    MOTOR_REAR_RIGHT_ENB, MOTOR_REAR_RIGHT_IN3, MOTOR_REAR_RIGHT_IN4,
+    PWM_CHANNEL_REAR_LEFT, PWM_CHANNEL_REAR_RIGHT);
 
-// State
+// Sensors
+UltrasonicSensor frontSensor(ULTRASONIC_FRONT_TRIG, ULTRASONIC_FRONT_ECHO);
+UltrasonicSensor rearSensor(ULTRASONIC_REAR_TRIG, ULTRASONIC_REAR_ECHO);
+MQ2Sensor gasSensor(GAS_SENSOR_ANALOG, GAS_SENSOR_DIGITAL);
+
+// WiFi Server
+WiFiServer_Manager wifiServer(WIFI_SERVER_PORT);
+
+// ============================================
+// STATE VARIABLES
+// ============================================
+
 RobotState currentState = STATE_INIT;
-MovementCommand lastCommand = CMD_STOP;
-float lastRearDistance = 0.0f;
-bool emergencyStopTriggered = false;
+NavigationState navState = NAV_FORWARD;
+bool autonomousMode = false;
+bool emergencyStopActive = false;
+
+// Sensor readings
+float frontDistance = 0;
+float rearDistance = 0;
+int gasLevel = 0;
+
+// Motor speeds
+int rearLeftSpeed = 0;
+int rearRightSpeed = 0;
+int frontLeftSpeed = 0;
+int frontRightSpeed = 0;
 
 // Timing
-unsigned long lastHeartbeatReceived = 0;
-unsigned long lastSafetyCheck = 0;
-unsigned long lastSensorPush = 0;
-unsigned long loopCounter = 0;
+unsigned long lastSensorUpdate = 0;
+unsigned long lastNavUpdate = 0;
+unsigned long lastTelemetryBroadcast = 0;
+unsigned long lastLoopTime = 0;
 
-#ifdef SERIAL_DEBUG
-#define DEBUG_PRINT(x) Serial.print(x)
-#define DEBUG_PRINTLN(x) Serial.println(x)
-#else
-#define DEBUG_PRINT(x)
-#define DEBUG_PRINTLN(x)
-#endif
+// ============================================
+// FUNCTION DECLARATIONS
+// ============================================
 
-static void setupWatchdog()
-{
-    esp_task_wdt_init(WATCHDOG_TIMEOUT / 1000, true);
-    esp_task_wdt_add(NULL);
-}
+void initSensors();
+void initMotors();
+void initWiFi();
+void updateSensors();
+void updateAutonomousNav();
+void broadcastTelemetry();
+void sendMotorCommandToFront(int leftSpeed, int rightSpeed);
+void handleEmergencyStop();
+void handleWiFiMessage(const JsonDocument &doc, AsyncClient *client);
+void logStatus();
 
-static void resetWatchdog()
-{
-    esp_task_wdt_reset();
-}
-
-static void executeMotorCommand(MovementCommand cmd)
-{
-    switch (cmd)
-    {
-    case CMD_FORWARD:
-        currentState = STATE_MANUAL;
-        rearMotors.forward(MOTOR_NORMAL_SPEED);
-        break;
-    case CMD_BACKWARD:
-        currentState = STATE_MANUAL;
-        rearMotors.backward(MOTOR_NORMAL_SPEED);
-        break;
-    case CMD_TURN_LEFT:
-        currentState = STATE_TURNING;
-        rearMotors.turnLeft(MOTOR_TURN_SPEED);
-        break;
-    case CMD_TURN_RIGHT:
-        currentState = STATE_TURNING;
-        rearMotors.turnRight(MOTOR_TURN_SPEED);
-        break;
-    case CMD_ROTATE_360:
-        currentState = STATE_TURNING;
-        rearMotors.rotate360(true);
-        break;
-    case CMD_CLIMB_BOOST:
-        currentState = STATE_CLIMBING;
-        rearMotors.forward(MOTOR_CLIMB_SPEED);
-        break;
-    case CMD_STOP:
-    default:
-        currentState = STATE_IDLE;
-        rearMotors.stop();
-        break;
-    }
-    lastCommand = cmd;
-}
-
-static MovementCommand mapStringToCommand(const char *cmd)
-{
-    if (!cmd)
-        return CMD_STOP;
-    if (!strcmp(cmd, "forward"))
-        return CMD_FORWARD;
-    if (!strcmp(cmd, "backward") || !strcmp(cmd, "back"))
-        return CMD_BACKWARD;
-    if (!strcmp(cmd, "left"))
-        return CMD_TURN_LEFT;
-    if (!strcmp(cmd, "right"))
-        return CMD_TURN_RIGHT;
-    if (!strcmp(cmd, "rotate_360"))
-        return CMD_ROTATE_360;
-    if (!strcmp(cmd, "climb_boost"))
-        return CMD_CLIMB_BOOST;
-    if (!strcmp(cmd, "stop"))
-        return CMD_STOP;
-    return CMD_STOP;
-}
-
-static void receiveMasterCommands()
-{
-    StaticJsonDocument<512> doc = masterComm.receiveMessage();
-    if (doc.size() == 0)
-        return;
-
-    const char *type = doc["type"] | "";
-    if (strcmp(type, "heartbeat") == 0)
-    {
-        lastHeartbeatReceived = millis();
-        return;
-    }
-
-    if (strcmp(type, "motor_command") == 0)
-    {
-        const char *cmdStr = doc["cmd"] | "";
-        MovementCommand cmd = mapStringToCommand(cmdStr);
-        executeMotorCommand(cmd);
-        return;
-    }
-}
-
-static void sendRearStatusToMaster()
-{
-    StaticJsonDocument<256> status;
-    status["type"] = "sensor_update";
-    status["source"] = "rear";
-    status["timestamp"] = millis();
-    status["data"]["rear_distance"] = lastRearDistance;
-    status["data"]["robot_state"] = (int)currentState;
-    masterComm.sendMessage(status);
-}
-
-static void handleEmergencyStop()
-{
-    safetyMonitor.triggerEmergencyStop();
-    rearMotors.stop();
-    currentState = STATE_EMERGENCY;
-    emergencyStopTriggered = true;
-}
+// ============================================
+// SETUP
+// ============================================
 
 void setup()
 {
-    Serial.begin(115200);
-    delay(800);
+    Serial.begin(SERIAL_BAUD_RATE);
+    delay(500);
 
-    setupWatchdog();
+    DEBUG_PRINTLN("\n\n=== PROJECT NIGHTFALL - BACK ESP32 (MASTER) ===");
+    DEBUG_PRINTLN("Initializing...");
 
-    pinMode(LED_BUILTIN, OUTPUT);
-    digitalWrite(LED_BUILTIN, LOW);
-
-    DEBUG_PRINTLN("\nPROJECT NIGHTFALL - REAR CONTROLLER STARTUP\n");
-
-    rearMotors.begin();
-    rearSensor.begin();
-    safetyMonitor.begin();
-    // Initialize hardware UART with proper pins
-    Serial1.begin(UART_BAUD_RATE, SERIAL_8N1, UART_MASTER_RX, UART_MASTER_TX);
-    masterComm.begin();
+    // Initialize components
+    initMotors();
+    initSensors();
+    initWiFi();
 
     currentState = STATE_IDLE;
-    emergencyStopTriggered = false;
+    DEBUG_PRINTLN("INIT COMPLETE - Ready for commands");
 
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(300);
-    digitalWrite(LED_BUILTIN, LOW);
+    esp_task_wdt_init(WATCHDOG_TIMEOUT_MS / 1000, true);
+    esp_task_wdt_add(NULL);
 }
+
+// ============================================
+// MAIN LOOP
+// ============================================
 
 void loop()
 {
-    resetWatchdog();
-    unsigned long now = millis();
+    unsigned long loopStart = millis();
+    esp_task_wdt_reset();
 
-    // Update rear distance @ 10Hz
-    if (now - lastSensorPush >= 100)
+    // WiFi updates (event-driven)
+    wifiServer.update();
+
+    // Update sensors at fixed interval
+    if (loopStart - lastSensorUpdate >= SENSOR_UPDATE_INTERVAL_MS)
     {
-        lastSensorPush = now;
-        lastRearDistance = rearSensor.getAverageDistance(3);
-        safetyMonitor.checkCollisionRisk(0.0f, lastRearDistance);
-        sendRearStatusToMaster();
+        lastSensorUpdate = loopStart;
+        updateSensors();
     }
 
-    // Safety @ 5Hz
-    if (now - lastSafetyCheck >= 200)
+    // Update navigation at fixed interval
+    if (autonomousMode && (loopStart - lastNavUpdate >= NAVIGATION_UPDATE_INTERVAL_MS))
     {
-        lastSafetyCheck = now;
-        safetyMonitor.update();
-        if (!safetyMonitor.isSafe() || safetyMonitor.isEmergency())
+        lastNavUpdate = loopStart;
+        updateAutonomousNav();
+    }
+
+    // Broadcast telemetry
+    if (loopStart - lastTelemetryBroadcast >= TELEMETRY_INTERVAL_MS)
+    {
+        lastTelemetryBroadcast = loopStart;
+        broadcastTelemetry();
+    }
+
+    // Check for gas hazard - highest priority
+    if (gasSensor.isGasDetected(GAS_THRESHOLD_EMERGENCY))
+    {
+        handleEmergencyStop();
+    }
+
+    // Frame rate limiting
+    unsigned long loopDuration = millis() - loopStart;
+    if (loopDuration < MAIN_LOOP_RATE_MS)
+    {
+        delay(MAIN_LOOP_RATE_MS - loopDuration);
+    }
+}
+
+// ============================================
+// INITIALIZATION FUNCTIONS
+// ============================================
+
+void initMotors()
+{
+    DEBUG_PRINTLN("[Motors] Initializing rear L298N driver...");
+    rearMotors.begin();
+    rearMotors.stopMotors();
+    DEBUG_PRINTLN("[Motors] Rear motors ready");
+}
+
+void initSensors()
+{
+    DEBUG_PRINTLN("[Sensors] Initializing ultrasonic sensors...");
+    frontSensor.begin();
+    rearSensor.begin();
+    DEBUG_PRINTLN("[Sensors] Initializing gas sensor...");
+    gasSensor.begin();
+    DEBUG_PRINTLN("[Sensors] All sensors ready");
+}
+
+void initWiFi()
+{
+    DEBUG_PRINTF("[WiFi] Starting AP: %s\n", WIFI_SSID);
+    DEBUG_PRINTF("[WiFi] Server on port %d\n", WIFI_SERVER_PORT);
+
+    wifiServer.begin();
+
+    wifiServer.setMessageHandler([](const JsonDocument &doc, AsyncClient *client)
+                                 { handleWiFiMessage(doc, client); });
+
+    DEBUG_PRINTLN("[WiFi] Ready for connections");
+}
+
+// ============================================
+// SENSOR UPDATES
+// ============================================
+
+void updateSensors()
+{
+    // Update sensor readings
+    frontSensor.update();
+    rearSensor.update();
+    gasSensor.update();
+
+    frontDistance = frontSensor.getDistance();
+    rearDistance = rearSensor.getDistance();
+    gasLevel = gasSensor.getSmoothedReading();
+
+    DEBUG_PRINTF("[Sensors] F:%.1fcm R:%.1fcm Gas:%d\n",
+                 frontDistance, rearDistance, gasLevel);
+}
+
+// ============================================
+// AUTONOMOUS NAVIGATION
+// ============================================
+
+void updateAutonomousNav()
+{
+    // Simple obstacle avoidance state machine
+
+    if (emergencyStopActive)
+    {
+        navState = NAV_IDLE;
+        rearMotors.stopMotors();
+        return;
+    }
+
+    // Check for obstacles
+    bool frontObstacle = frontSensor.isObstacleDetected(ULTRASONIC_THRESHOLD_OBSTACLE);
+    bool rearObstacle = rearSensor.isObstacleDetected(ULTRASONIC_THRESHOLD_OBSTACLE);
+
+    switch (navState)
+    {
+    case NAV_FORWARD:
+        if (frontObstacle)
         {
-            if (!emergencyStopTriggered)
-            {
-                handleEmergencyStop();
-            }
+            // Obstacle detected - switch to avoidance
+            navState = NAV_OBSTACLE_DETECTED;
+            DEBUG_PRINTLN("[Nav] Obstacle detected - initiating avoidance");
         }
-        else if (emergencyStopTriggered && safetyMonitor.isSafe())
+        else
         {
-            emergencyStopTriggered = false;
-            safetyMonitor.resetEmergencyStop();
+            // Continue forward
+            rearMotors.setMotorsForward(MOTOR_NORMAL_SPEED);
+            rearLeftSpeed = MOTOR_NORMAL_SPEED;
+            rearRightSpeed = MOTOR_NORMAL_SPEED;
+        }
+        break;
+
+    case NAV_OBSTACLE_DETECTED:
+        // Stop and assess
+        rearMotors.stopMotors();
+        navState = NAV_AVOID_LEFT;
+        break;
+
+    case NAV_AVOID_LEFT:
+        // Try turning left
+        rearMotors.turnLeft(MOTOR_TURN_SPEED);
+        navState = NAV_FORWARD;
+        DEBUG_PRINTLN("[Nav] Turning left to avoid obstacle");
+        break;
+
+    case NAV_AVOID_RIGHT:
+        // Try turning right
+        rearMotors.turnRight(MOTOR_TURN_SPEED);
+        navState = NAV_FORWARD;
+        DEBUG_PRINTLN("[Nav] Turning right to avoid obstacle");
+        break;
+
+    case NAV_CLIMBING:
+        // Boost rear motors for climbing
+        if (frontDistance < ULTRASONIC_THRESHOLD_CLIFF)
+        {
+            rearMotors.setMotorsForward(MOTOR_CLIMB_SPEED);
+            rearLeftSpeed = MOTOR_CLIMB_SPEED;
+            rearRightSpeed = MOTOR_CLIMB_SPEED;
+        }
+        else
+        {
+            navState = NAV_FORWARD;
+        }
+        break;
+
+    case NAV_IDLE:
+        rearMotors.stopMotors();
+        break;
+
+    default:
+        navState = NAV_FORWARD;
+        break;
+    }
+
+    // Send command to Front ESP32
+    sendMotorCommandToFront(rearLeftSpeed, rearRightSpeed);
+}
+
+// ============================================
+// COMMUNICATION
+// ============================================
+
+void sendMotorCommandToFront(int leftSpeed, int rightSpeed)
+{
+    StaticJsonDocument<256> cmd;
+    Msg::buildMotorCmd(cmd, leftSpeed, rightSpeed, "front");
+
+    wifiServer.broadcast(cmd);
+}
+
+void broadcastTelemetry()
+{
+    StaticJsonDocument<512> telemetry;
+    Msg::buildTelemetry(telemetry,
+                        frontDistance, rearDistance, gasLevel,
+                        frontLeftSpeed, frontRightSpeed,
+                        rearLeftSpeed, rearRightSpeed,
+                        autonomousMode,
+                        navState == NAV_FORWARD ? "forward" : "obstacle_avoidance");
+
+    wifiServer.broadcast(telemetry);
+}
+
+void handleWiFiMessage(const JsonDocument &doc, AsyncClient *client)
+{
+    const char *msgType = doc["type"] | "";
+
+    DEBUG_PRINTF("[WiFi] Received: %s\n", msgType);
+
+    if (strcmp(msgType, Msg::TYPE_UI_CMD) == 0)
+    {
+        const char *cmd = doc["cmd"] | "";
+
+        if (strcmp(cmd, "auto_on") == 0)
+        {
+            autonomousMode = true;
+            navState = NAV_FORWARD;
+            currentState = STATE_AUTONOMOUS;
+            DEBUG_PRINTLN("[Nav] Autonomous mode ON");
+        }
+        else if (strcmp(cmd, "auto_off") == 0)
+        {
+            autonomousMode = false;
             currentState = STATE_IDLE;
+            rearMotors.stopMotors();
+            DEBUG_PRINTLN("[Nav] Autonomous mode OFF");
+        }
+        else if (strcmp(cmd, "forward") == 0)
+        {
+            autonomousMode = false;
+            currentState = STATE_MANUAL;
+            rearMotors.setMotorsForward(MOTOR_NORMAL_SPEED);
+        }
+        else if (strcmp(cmd, "backward") == 0)
+        {
+            autonomousMode = false;
+            currentState = STATE_MANUAL;
+            rearMotors.setMotorsBackward(MOTOR_NORMAL_SPEED);
+        }
+        else if (strcmp(cmd, "left") == 0)
+        {
+            autonomousMode = false;
+            currentState = STATE_MANUAL;
+            rearMotors.turnLeft(MOTOR_TURN_SPEED);
+        }
+        else if (strcmp(cmd, "right") == 0)
+        {
+            autonomousMode = false;
+            currentState = STATE_MANUAL;
+            rearMotors.turnRight(MOTOR_TURN_SPEED);
+        }
+        else if (strcmp(cmd, "stop") == 0)
+        {
+            autonomousMode = false;
+            currentState = STATE_IDLE;
+            rearMotors.stopMotors();
+        }
+        else if (strcmp(cmd, "estop") == 0)
+        {
+            handleEmergencyStop();
         }
     }
 
-    // Receive commands from front
-    receiveMasterCommands();
+    // Send acknowledgment
+    StaticJsonDocument<128> ack;
+    Msg::buildAck(ack, Msg::ROLE_BACK, msgType, true);
+    wifiServer.sendTo(client, ack);
+}
 
-    loopCounter++;
+void handleEmergencyStop()
+{
+    if (emergencyStopActive)
+        return;
+
+    emergencyStopActive = true;
+    currentState = STATE_EMERGENCY;
+    autonomousMode = false;
+    navState = NAV_IDLE;
+
+    rearMotors.stopMotors();
+    rearLeftSpeed = 0;
+    rearRightSpeed = 0;
+
+    // Buzz buzzer
+    pinMode(BUZZER_PIN, OUTPUT);
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(BUZZER_ALERT_DURATION_MS);
+    digitalWrite(BUZZER_PIN, LOW);
+
+    // Broadcast alert
+    StaticJsonDocument<256> alert;
+    Msg::buildHazardAlert(alert, Msg::HAZARD_GAS,
+                          "GAS DETECTED - EMERGENCY STOP ACTIVATED", true);
+    wifiServer.broadcast(alert);
+
+    DEBUG_PRINTLN("[EMERGENCY] STOP TRIGGERED - GAS DETECTED!");
+}
+
+void logStatus()
+{
+    DEBUG_PRINTF("[Status] State:%d NavState:%d Auto:%d\n",
+                 currentState, navState, autonomousMode);
 }
