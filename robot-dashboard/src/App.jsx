@@ -1,745 +1,347 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Power, 
-  Wifi, 
-  Battery, 
-  BatteryCharging, 
-  Activity, 
-  AlertTriangle, 
-  Map as MapIcon, 
-  Settings, 
-  Video, 
-  Crosshair, 
-  Target, 
-  Thermometer, 
-  Wind, 
-  Cpu, 
-  ArrowUp, 
-  ArrowDown, 
-  ArrowLeft, 
-  ArrowRight, 
-  RotateCw, 
-  StopCircle,
-  Terminal,
-  Layers,
-  Zap
+  Power, Wifi, Activity, AlertTriangle, Settings, Video, Crosshair, Target, 
+  Wind, Cpu, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Zap, Terminal, 
+  Layers, Radio, Gauge, AlertCircle, Clock
 } from 'lucide-react';
+import { useNightfallWS } from './hooks/useNightfallWS';
 
 // --- Utility Components ---
 
 const Card = ({ children, className = "", title, icon: Icon, color = "text-blue-400" }) => (
-  <div className={`bg-gray-900 border border-gray-800 rounded-lg overflow-hidden shadow-lg ${className}`}>
+  <div className={`bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-lg flex flex-col ${className}`}>
     {(title || Icon) && (
-      <div className="bg-gray-800/50 px-4 py-2 border-b border-gray-800 flex items-center justify-between">
+      <div className="bg-gray-800/30 px-4 py-3 border-b border-gray-800 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
-          {Icon && <Icon size={16} className={color} />}
-          <span className="text-gray-300 font-mono text-sm uppercase tracking-wider">{title}</span>
+          {Icon && <Icon size={18} className={color} />}
+          <span className="text-gray-200 font-bold tracking-wide text-sm">{title}</span>
         </div>
       </div>
     )}
-    <div className="p-4">{children}</div>
+    <div className="p-4 flex-1">{children}</div>
   </div>
 );
 
-const ProgressBar = ({ value, max = 100, color = "bg-blue-500", height = "h-2" }) => (
-  <div className={`w-full bg-gray-700 rounded-full ${height} overflow-hidden`}>
-    <div 
-      className={`h-full transition-all duration-300 ${color}`} 
-      style={{ width: `${Math.min(100, Math.max(0, (value / max) * 100))}%` }}
-    />
-  </div>
-);
-
-const Sparkline = ({ data, color = "stroke-blue-500", height = 40 }) => {
-  if (!data || data.length < 2) return null;
-  const max = Math.max(...data, 1);
+const Sparkline = ({ data = [], color = "stroke-blue-500", height = 40 }) => {
+  if (!data || data.length < 2) return <div style={{ height }} className="w-full bg-gray-800/20 rounded" />;
+  const max = Math.max(...data);
   const min = Math.min(...data);
   const range = max - min || 1;
-  
   const points = data.map((d, i) => {
     const x = (i / (data.length - 1)) * 100;
     const y = 100 - ((d - min) / range) * 100;
     return `${x},${y}`;
   }).join(' ');
-
   return (
     <svg className="w-full overflow-visible" height={height} viewBox="0 0 100 100" preserveAspectRatio="none">
-      <polyline points={points} fill="none" strokeWidth="2" className={color} vectorEffect="non-scaling-stroke" />
+      <polyline points={points} fill="none" className={color} strokeWidth="2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 };
 
-// --- Main Application ---
+// --- Widgets ---
+
+const ConnectionBadge = ({ status, stats, lastPing }) => {
+  const styles = {
+    connected: { bg: 'bg-emerald-500', text: 'text-emerald-500', label: 'CONNECTED' },
+    connecting: { bg: 'bg-yellow-500', text: 'text-yellow-500', label: 'CONNECTING' },
+    disconnected: { bg: 'bg-red-500', text: 'text-red-500', label: 'DISCONNECTED' },
+    error: { bg: 'bg-red-500', text: 'text-red-500', label: 'ERROR' }
+  };
+  const s = styles[status] || styles.disconnected;
+
+  return (
+    <div className="flex items-center gap-4 bg-gray-900 border border-gray-800 rounded-lg p-3">
+      <div className="flex items-center gap-3">
+        <div className={`w-3 h-3 rounded-full ${s.bg} ${status === 'connected' ? 'shadow-[0_0_10px_currentColor]' : 'animate-pulse'}`} />
+        <div>
+           <div className={`font-bold tracking-wider text-sm ${s.text}`}>{s.label}</div>
+           <div className="text-[10px] text-gray-500 font-mono flex gap-2">
+             <span>{stats.msgRate} msg/s</span>
+             <span>•</span>
+             <span>{lastPing}ms latency</span>
+           </div>
+        </div>
+      </div>
+      {status !== 'connected' && stats.lastError && (
+        <div className="ml-auto text-xs text-red-400 font-mono bg-red-900/20 px-2 py-1 rounded">
+           {stats.lastError} (x{stats.reconnectAttempts})
+        </div>
+      )}
+    </div>
+  );
+};
+
+const GasGauge = ({ value, trend }) => {
+  let status = value > 2000 ? 'DANGER' : value > 1000 ? 'WARNING' : 'SAFE';
+  let color = value > 2000 ? 'text-red-500' : value > 1000 ? 'text-orange-400' : 'text-emerald-400';
+  let bg = value > 2000 ? 'bg-red-500/10 border-red-500/50' : value > 1000 ? 'bg-orange-500/10 border-orange-500/50' : 'bg-emerald-500/10 border-emerald-500/50';
+
+  return (
+    <div className={`rounded-xl border p-4 ${bg} transition-colors duration-300`}>
+      <div className="flex justify-between items-start mb-2">
+        <div className="flex items-center gap-2">
+          <Wind className={color} size={20} />
+          <span className={`text-sm font-bold tracking-wider ${color}`}>AIR QUALITY</span>
+        </div>
+        <span className={`text-xs font-bold px-2 py-0.5 rounded bg-black/40 ${color}`}>{status}</span>
+      </div>
+      <div className="flex items-baseline gap-2 mb-2">
+        <span className={`text-3xl font-mono font-bold ${color}`}>{value}</span>
+        <span className="text-xs text-gray-400 font-mono">PPM</span>
+      </div>
+      <div className="h-8 w-full">
+         <Sparkline data={trend} color={value > 1000 ? "stroke-red-500" : "stroke-emerald-500"} height={32} />
+      </div>
+    </div>
+  );
+};
+
+const DistanceWidget = ({ front, rear, trend }) => {
+  const getZone = (d) => d < 30 ? 'bg-red-500' : d < 60 ? 'bg-yellow-500' : 'bg-emerald-500';
+  return (
+    <div className="grid grid-cols-2 gap-3 h-full">
+      <div className="bg-gray-800/40 rounded-lg p-3 border border-gray-700 relative overflow-hidden flex flex-col justify-between">
+           <div className={`absolute left-0 top-0 bottom-0 w-1 ${getZone(front)}`} />
+           <div className="flex justify-between text-xs text-gray-400 font-mono mb-1 pl-2">FRONT</div>
+           <div className="text-2xl font-mono font-bold text-white pl-2 z-10">{front.toFixed(1)} <span className="text-xs text-gray-500">cm</span></div>
+           {front < 30 && <div className="absolute top-2 right-2 text-[10px] font-bold bg-red-600 text-white px-1.5 rounded animate-pulse z-20">TOO CLOSE</div>}
+           <div className="absolute bottom-0 left-0 right-0 h-8 opacity-30 pointer-events-none">
+              <Sparkline data={trend} color={front < 30 ? "stroke-red-500" : "stroke-blue-400"} height={32} />
+           </div>
+      </div>
+      <div className="bg-gray-800/40 rounded-lg p-3 border border-gray-700 relative overflow-hidden flex flex-col justify-between">
+           <div className={`absolute left-0 top-0 bottom-0 w-1 ${getZone(rear)}`} />
+           <div className="flex justify-between text-xs text-gray-400 font-mono mb-1 pl-2">REAR</div>
+           <div className="text-2xl font-mono font-bold text-white pl-2">{rear.toFixed(1)} <span className="text-xs text-gray-500">cm</span></div>
+           {rear < 30 && <div className="absolute top-2 right-2 text-[10px] font-bold bg-red-600 text-white px-1.5 rounded animate-pulse">TOO CLOSE</div>}
+      </div>
+    </div>
+  );
+};
+
+// --- Main App ---
 
 export default function RobotDashboard() {
-  // --- State Management ---
+  const { telemetry, connectionStatus, connectionStats, sendUiCmd, lastPing } = useNightfallWS();
+  const { sensors, motors, state, network, server_clients } = telemetry;
   
-  // ESP32 Connection Status
-  const [espStatus, setEspStatus] = useState({
-    front: { connected: false, ip: '192.168.4.1', name: 'Front Controller', lastSeen: null },
-    rear: { connected: false, ip: 'via UART', name: 'Rear Controller', lastSeen: null },
-    camera: { connected: false, ip: '192.168.4.1:81', name: 'ESP32-CAM', lastSeen: null }
-  });
-  
-  // System Status
-  const [connection, setConnection] = useState({ status: 'connected', ping: 24, lastHeartbeat: Date.now() });
-   const [battery, setBattery] = useState({ voltage: 0, percentage: 0, charging: false });
-  const [robotState, setRobotState] = useState('IDLE'); // IDLE, MANUAL, AUTONOMOUS, ERROR
-  const [mode, setMode] = useState('MANUAL');
-  
-  // Sensors
-  const [sensors, setSensors] = useState({
-     distanceFront: 0,
-     distanceRear: 0,
-     gas_level: 0,           // Raw ADC value (0-4095)
-     gas_detected: false,    // Boolean: gas detected
-     gas_trend: 0,           // Rate of change
-     smoke_warning: false,   // Threshold 2000 PPM
-     smoke_emergency: false, // Threshold 3000 PPM
-     temp: 0,
-     humidity: 0
-  });
-  
-  // Navigation
-   const [odometry, setOdometry] = useState({ x: 0, y: 0, heading: 0, speed: 0 });
-   const [motors, setMotors] = useState({ left: 0, right: 0 });
-  
-  // Mission
-  const [mission, setMission] = useState({
-    active: false,
-     currentWaypoint: 0,
-     totalWaypoints: 0,
-     progress: 0
-  });
+  // Stats & Trends
+  const [history, setHistory] = useState({ gas: [], front: [] });
+  useEffect(() => {
+    setHistory(h => ({
+      gas: [...h.gas.slice(-50), sensors.gas],
+      front: [...h.front.slice(-50), sensors.front_dist]
+    }));
+  }, [sensors.gas, sensors.front_dist]);
 
-  // Logs & Alerts
-  const [logs, setLogs] = useState([
-     { id: 1, time: new Date().toLocaleTimeString('en-US', { hour12: false }), type: 'info', msg: 'Waiting for ESP32 data...' },
-  ]);
-  
-  // History for graphs
-  const [history, setHistory] = useState({
-    battery: [],
-    speed: [],
-    gas: []
-  });
+  // Optimistic UI
+  const [optimisticAuto, setOptimisticAuto] = useState(null);
+  const isAuto = optimisticAuto !== null ? optimisticAuto : state.autonomous;
+  const isEmerg = state.fsm === 'EMERGENCY';
 
-  // ML Detection Mock
-  const [detection, setDetection] = useState({
-    label: 'None',
-    confidence: 0,
-    box: null
-  });
+  // Logs
+  const [logs, setLogs] = useState([]);
+  const logsEndRef = useRef(null);
+  const addLog = (msg, type = 'info') => {
+    const colors = { info: 'text-gray-400', warn: 'text-yellow-400', error: 'text-red-400' };
+    setLogs(p => [...p.slice(-99), { t: new Date().toLocaleTimeString(), m: msg, c: colors[type] }]);
+  };
 
-  // --- Real ESP32 Integration ---
-  const ESP32_IP = '192.168.4.1'; // Front ESP32 WiFi AP
-  const wsRef = useRef(null);
+  // Effects
+  useEffect(() => {
+    if (state.autonomous === optimisticAuto) setOptimisticAuto(null);
+  }, [state.autonomous]);
 
   useEffect(() => {
-    // WebSocket connection to front ESP32
-    const connectWebSocket = () => {
-      const ws = new WebSocket(`ws://${ESP32_IP}/ws`);
-      wsRef.current = ws;
-      
-      ws.onopen = () => {
-        handleLog('info', '✓ Connected to Robot WebSocket');
-        setConnection(prev => ({ ...prev, status: 'connected' }));
-      };
-      
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          const now = Date.now();
-          
-          // Update sensors
-          setSensors({
-            distanceFront: data.front_distance || 0,
-            distanceRear: data.rear_distance || 0,
-            gas_level: data.gas_level || 0,
-            gas_detected: data.gas_detected || false,
-            gas_trend: data.gas_trend || 0,
-            smoke_warning: data.smoke_warning || false,
-            smoke_emergency: data.smoke_emergency || false,
-             temp: data.temperature || 0,
-             humidity: data.humidity || 0
-          });
-          
-          // Update state
-          const states = ['INIT', 'IDLE', 'AUTONOMOUS', 'MANUAL', 'EMERGENCY', 'CLIMBING', 'TURNING', 'AVOIDING'];
-          setRobotState(states[data.state] || 'IDLE');
-          setMode(data.autonomous ? 'AUTONOMOUS' : 'MANUAL');
-          
-          // Update connection ping
-          setConnection({ 
-            status: 'connected', 
-            ping: data.uptime_ms ? (now - data.uptime_ms) % 1000 : 24,
-            lastHeartbeat: now
-          });
-          
-          // Update ESP32 status
-          setEspStatus(prev => ({
-            ...prev,
-            front: { ...prev.front, connected: true, lastSeen: now },
-            rear: { ...prev.rear, connected: !!data.rear_connected, lastSeen: now }
-          }));
-
-          // Update history for graphs
-          setHistory(prev => ({
-            battery: prev.battery,
-            speed: prev.speed,
-            gas: (data.gas_level !== undefined) ? [...prev.gas.slice(-20), data.gas_level] : prev.gas
-          }));
-          
-        } catch (err) {
-          console.error('WebSocket parse error:', err);
-        }
-      };
-
-      ws.onerror = (err) => {
-        handleLog('critical', 'WebSocket error - check connection');
-        setConnection({ status: 'disconnected', ping: 0, lastHeartbeat: Date.now() });
-      };
-      
-      ws.onclose = () => {
-        handleLog('warning', 'WebSocket closed - reconnecting...');
-        setConnection({ status: 'disconnected', ping: 0, lastHeartbeat: Date.now() });
-        setTimeout(connectWebSocket, 2000);
-      };
-    };
-
-    connectWebSocket();
-    
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, []);
-
-  // --- Handlers ---
-
-  const handleLog = (type, msg) => {
-    const time = new Date().toLocaleTimeString('en-US', { hour12: false });
-    setLogs(prev => [{ id: Date.now(), time, type, msg }, ...prev].slice(0, 50));
-  };
-
-  // Define sendCommand FIRST (before functions that use it)
-  const sendCommand = useCallback((cmd) => {
-    // Send via HTTP POST API
-    fetch(`http://${ESP32_IP}/api/command`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cmd })
-    }).catch(err => {
-      handleLog('critical', `Failed to send command: ${cmd}`);
-      console.error(err);
-    });
-  }, []);
-
-  const emergencyStop = useCallback(() => {
-    sendCommand('estop');
-    setRobotState('EMERGENCY');
-    setMotors({ left: 0, right: 0 });
-    setOdometry(prev => ({ ...prev, speed: 0 }));
-    handleLog('critical', '🛑 EMERGENCY STOP TRIGGERED');
-  }, [sendCommand]);
-
-  const toggleMode = () => {
-    const newMode = mode === 'MANUAL' ? 'AUTONOMOUS' : 'MANUAL';
-    sendCommand(newMode === 'AUTONOMOUS' ? 'autonomous_on' : 'autonomous_off');
-    handleLog('info', `Switched to ${newMode} mode`);
-  };
-
-  const handleControl = useCallback((action) => {
-    if (robotState === 'EMERGENCY' || mode === 'AUTONOMOUS') return;
-    
-    const cmdMap = {
-      'UP': 'forward',
-      'DOWN': 'backward',
-      'LEFT': 'left',
-      'RIGHT': 'right',
-      'STOP': 'stop'
-    };
-    
-    const cmd = cmdMap[action];
-    if (cmd) {
-      sendCommand(cmd);
-      handleLog('info', `Command sent: ${cmd}`);
-    }
-  }, [robotState, mode, sendCommand]);
-
-  // Keyboard Listeners
+    if (isEmerg) addLog('EMERGENCY STATE DETECTED - CONTROLS LOCKED', 'error');
+  }, [isEmerg]);
+  
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.repeat) return;
-      if (e.key === ' ') { e.preventDefault(); emergencyStop(); }
-      if (e.key === 'w' || e.key === 'ArrowUp') handleControl('UP');
-      if (e.key === 's' || e.key === 'ArrowDown') handleControl('DOWN');
-      if (e.key === 'a' || e.key === 'ArrowLeft') handleControl('LEFT');
-      if (e.key === 'd' || e.key === 'ArrowRight') handleControl('RIGHT');
-    };
-    
-    const handleKeyUp = (e) => {
-      if (['w', 's', 'ArrowUp', 'ArrowDown'].includes(e.key)) handleControl('STOP');
-      if (['a', 'd', 'ArrowLeft', 'ArrowRight'].includes(e.key)) handleControl('STOP');
-    };
+      addLog(`WebSocket ${connectionStatus}`, connectionStatus === 'connected' ? 'info' : 'error');
+  }, [connectionStatus]);
 
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [handleControl, emergencyStop]);
-
-
-  // --- Helper Functions for UI ---
-
-  const getBatteryColor = (level) => {
-    if (level > 50) return "text-emerald-400";
-    if (level > 20) return "text-yellow-400";
-    return "text-red-500 animate-pulse";
+  // Handlers
+  const handleControl = (cmd) => {
+    if (isEmerg || isAuto) return;
+    sendUiCmd(cmd);
+    // addLog(`CMD: ${cmd}`); // Too noisy for repeated keys
   };
 
-  const getDistanceColor = (dist) => {
-    if (dist > 50) return "bg-emerald-500";
-    if (dist > 20) return "bg-yellow-500";
-    return "bg-red-500";
+  const toggleAuto = () => {
+    if (isEmerg) return;
+    const next = !isAuto;
+    setOptimisticAuto(next);
+    sendUiCmd(next ? 'auto_on' : 'auto_off');
+    addLog(`User switched to ${next ? 'AUTO' : 'MANUAL'}`, 'warn');
   };
 
-  const getStateColor = (state) => {
-    switch(state) {
-      case 'IDLE': return 'bg-gray-600';
-      case 'MANUAL': return 'bg-blue-600';
-      case 'AUTONOMOUS': return 'bg-purple-600';
-      case 'EMERGENCY': return 'bg-red-600 animate-pulse';
-      default: return 'bg-gray-600';
+  const handleEstop = () => {
+    if (window.confirm("TRIGGER EMERGENCY STOP?")) {
+      sendUiCmd('stop');
+      sendUiCmd('auto_off');
+      addLog('USER TRIGGERED E-STOP', 'error');
     }
   };
 
-  // --- Main Render ---
+  // --- Render ---
 
   return (
     <div className="min-h-screen bg-black text-gray-200 font-sans selection:bg-blue-500/30 overflow-hidden flex flex-col">
       
-      {/* 1. TOP BAR */}
-      <header className="h-14 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-4 shrink-0 z-50">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2 text-blue-400">
-            <Cpu className="animate-spin-slow" />
-            <span className="font-bold text-lg tracking-wider">ROBO-OS v2.4</span>
+      {/* 1. TOP BAR: Status & criticals */}
+      <header className="h-18 bg-gray-900 border-b border-gray-800 p-4 flex gap-4 items-center justify-between shrink-0 z-50">
+        <div className="flex items-center gap-6">
+          <div className="flex flex-col">
+             <div className="flex items-center gap-2 text-blue-400">
+               <Cpu className="animate-spin-slow" size={20} />
+               <span className="font-bold text-lg tracking-wider">NIGHTFALL</span>
+             </div>
+             <div className="text-[10px] text-gray-500 font-mono tracking-widest pl-7">MISSION CONTROL</div>
           </div>
-          <div className="h-6 w-px bg-gray-700 mx-2 hidden md:block"></div>
-          <div className={`px-3 py-1 rounded-full text-xs font-bold tracking-wider flex items-center gap-2 ${getStateColor(robotState)} text-white`}>
-            <Activity size={14} />
-            {robotState}
-          </div>
+          
+          <ConnectionBadge status={connectionStatus} stats={connectionStats} lastPing={lastPing} />
         </div>
 
-        <div className="flex items-center gap-6">
-          {/* ESP32 Boards Status */}
-          <div className="hidden lg:flex items-center gap-3 bg-gray-800 px-3 py-1 rounded-lg border border-gray-700">
-            <span className="text-xs text-gray-400 font-mono">ESP32:</span>
-            <div className="flex items-center gap-1">
-              <div className={`w-2 h-2 rounded-full ${espStatus.front.connected ? 'bg-emerald-500' : 'bg-red-500'}`} />
-              <span className="text-xs text-gray-300">Front</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className={`w-2 h-2 rounded-full ${espStatus.rear.connected ? 'bg-emerald-500' : 'bg-gray-500'}`} />
-              <span className="text-xs text-gray-300">Rear</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className={`w-2 h-2 rounded-full ${espStatus.camera.connected ? 'bg-emerald-500' : 'bg-red-500'}`} />
-              <span className="text-xs text-gray-300">Cam</span>
+        <div className="flex items-center gap-4">
+           {/* FSM PILL */}
+           <div className={`px-5 py-2 rounded-lg font-bold tracking-wider text-sm flex items-center gap-3 border shadow-lg transition-all ${
+             isEmerg ? 'bg-red-600 border-red-400 text-white animate-pulse' : 
+             isAuto ? 'bg-purple-600 border-purple-400 text-white' : 
+             'bg-gray-800 border-gray-600 text-gray-300'
+           }`}>
+            <div>
+              <div className="text-[10px] opacity-70 leading-none mb-1">SYSTEM STATE</div>
+              <div className="flex items-center gap-2">
+                 <Activity size={16} />
+                 {state.nav_state === 'forward' && isAuto && <span className="animate-pulse">▶</span>}
+                 {state.fsm || 'INIT'}
+              </div>
             </div>
           </div>
-        
-           {/* Connection */}
-          <div className="flex items-center gap-2 text-sm font-mono">
-             <div className={`w-2 h-2 rounded-full ${connection.status === 'connected' ? 'bg-emerald-500' : 'bg-red-500 animate-ping'}`} />
-             <span className={connection.status === 'connected' ? 'text-emerald-400' : 'text-red-400'}>
-               {connection.ping}ms
-             </span>
-             <Wifi size={16} className="text-gray-500" />
-          </div>
-
-          {/* Power Status (USB - no battery monitoring yet) */}
-          <div className="flex items-center gap-3 bg-gray-800 px-3 py-1 rounded-lg border border-gray-700">
-            <div className="flex flex-col items-end leading-none">
-              <span className="text-sm font-bold font-mono text-blue-400">USB</span>
-              <span className="text-[10px] text-gray-400">Power</span>
-            </div>
-            <Zap size={20} className="text-blue-400" />
-          </div>
-
-          {/* E-STOP Header Button (Mobile/Tablet Access) */}
+          
           <button 
-            onClick={emergencyStop}
-            className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-md font-bold transition-colors md:hidden"
+           onClick={handleEstop}
+           className="bg-red-600 hover:bg-red-700 active:scale-95 text-white px-6 py-2 rounded-lg font-bold text-lg flex items-center gap-2 shadow-[0_0_15px_rgba(220,38,38,0.5)] border border-red-500 transition-all"
           >
-            STOP
+            <Power size={24} /> STOP
           </button>
         </div>
       </header>
 
-      {/* MAIN GRID LAYOUT */}
-      <main className="flex-1 overflow-auto p-2 md:p-4 grid grid-cols-1 md:grid-cols-12 gap-4">
+      {/* 2. MAIN GRID */}
+      <main className="flex-1 overflow-hidden p-4 grid grid-cols-12 grid-rows-12 gap-4">
         
-        {/* LEFT COLUMN: Camera & Controls (40% on Desktop) */}
-        <div className="md:col-span-5 lg:col-span-5 flex flex-col gap-4">
-          
-          {/* CAMERA FEED - CRITICAL */}
-          <Card className="relative group min-h-[300px] flex flex-col" title="Live Feed" icon={Video} color="text-red-400">
-            <div className="relative flex-1 bg-gray-950 rounded border border-gray-800 overflow-hidden flex items-center justify-center">
-              {/* Live ESP32-CAM Feed */}
-              <img 
-                src={`http://${ESP32_IP}:81/stream`} 
-                alt="ESP32-CAM Live Stream"
-                className="w-full h-full object-contain"
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                  handleLog('warning', 'Camera stream unavailable');
-                  setEspStatus(prev => ({
-                    ...prev,
-                    camera: { ...prev.camera, connected: false, lastSeen: Date.now() }
-                  }));
-                }}
-                onLoad={(e) => {
-                  e.target.style.display = 'block';
-                  setEspStatus(prev => ({
-                    ...prev,
-                    camera: { ...prev.camera, connected: true, lastSeen: Date.now() }
-                  }));
-                }}
-              />
-              
-              {/* Crosshair Overlay */}
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none opacity-30">
-                <Crosshair className="text-white/50 w-16 h-16" />
-              </div>
+        {/* LEFT: VISION (6 cols, 7 rows) */}
+        <div className="col-span-6 row-span-7 relative bg-black rounded-xl border border-gray-800 overflow-hidden group">
+           <img 
+             src="http://192.168.4.1:81/stream" 
+             className="w-full h-full object-contain"
+             onError={(e) => { e.target.style.display = 'none'; }}
+           />
+           <div className="absolute top-4 left-4 flex gap-2">
+             <span className="bg-red-600 text-white px-2 py-0.5 text-xs font-bold rounded animate-pulse">LIVE</span>
+             <span className={`px-2 py-0.5 text-xs font-bold rounded ${network.camera ? 'bg-green-600/80 text-white' : 'bg-red-600/80 text-white'}`}>
+                CAM: {network.camera ? 'OK' : 'LOST'}
+             </span>
+           </div>
+           <div className="absolute inset-0 border-2 border-white/10 rounded-xl pointer-events-none group-hover:border-white/20 transition-all" />
+        </div>
 
-              {/* ML Detection Bounding Box */}
-              {detection.box && (
-                <div 
-                  className="absolute border-2 border-yellow-400 bg-yellow-400/10 transition-all duration-300"
-                  style={{ 
-                    left: `${detection.box.x}%`, 
-                    top: `${detection.box.y}%`, 
-                    width: `${detection.box.w}%`, 
-                    height: `${detection.box.h}%` 
-                  }}
-                >
-                  <div className="absolute -top-6 left-0 bg-yellow-400 text-black text-xs font-bold px-1 py-0.5 rounded-t">
-                    {detection.label} {detection.confidence}%
+        {/* RIGHT: TELEMETRY (6 cols, 7 rows) */}
+        <div className="col-span-6 row-span-7 grid grid-rows-2 gap-4">
+           {/* Top: Safety */}
+           <div className="grid grid-cols-2 gap-4">
+              <GasGauge value={sensors.gas} trend={history.gas} />
+              <div className="flex flex-col gap-4">
+                 <DistanceWidget front={sensors.front_dist} rear={sensors.rear_dist} trend={history.front} />
+                 <div className="bg-gray-800/40 rounded-lg p-3 border border-gray-700 flex justify-between items-center">
+                    <span className="text-gray-400 text-xs font-bold">FRONT ESP</span>
+                    <span className={`text-xs font-mono px-2 py-1 rounded ${network.front ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-500'}`}>
+                      {network.front ? 'ONLINE' : 'OFFLINE'}
+                    </span>
+                 </div>
+              </div>
+           </div>
+
+           {/* Bot: Motor Telemetry */}
+           <Card title="Drive Train" icon={Gauge} className="h-full">
+              <div className="grid grid-cols-4 gap-4 h-full">
+                 {[ 
+                   { l: 'FL', v: motors.front_left }, { l: 'FR', v: motors.front_right },
+                   { l: 'RL', v: motors.rear_left },  { l: 'RR', v: motors.rear_right } 
+                 ].map((m, i) => (
+                   <div key={i} className="bg-gray-950 rounded p-2 flex flex-col justify-end relative overflow-hidden border border-gray-800">
+                      <div 
+                         className="absolute bottom-0 left-0 right-0 bg-blue-900/30 transition-all duration-200" 
+                         style={{ height: `${(m.v/255)*100}%` }} 
+                      />
+                      <div className="relative z-10 text-center">
+                        <div className="text-[10px] text-gray-500 mb-1">{m.l}</div>
+                        <div className="font-mono font-bold text-blue-300">{m.v}</div>
+                      </div>
+                   </div>
+                 ))}
+              </div>
+           </Card>
+        </div>
+
+        {/* BOTTOM: LOGS (7 cols, 5 rows) */}
+        <div className="col-span-7 row-span-5 relative">
+          <Card title="Mission Log" icon={Terminal} className="h-full">
+             <div className="flex-1 overflow-y-auto font-mono text-[11px] space-y-1 pr-2 max-h-[220px] scrollbar-thin scrollbar-thumb-gray-800">
+               {logs.length === 0 && <div className="text-gray-600 italic p-4 text-center">System Ready. Waiting for events...</div>}
+               {logs.map((l, i) => (
+                 <div key={i} className="border-l-2 border-gray-800 pl-2 hover:bg-gray-800/20 py-0.5 rounded-r transition-colors">
+                   <span className="text-gray-500 mr-3 opacity-50">{l.t}</span>
+                   <span className={l.c}>{l.m}</span>
+                 </div>
+               ))}
+               <div ref={logsEndRef} />
+             </div>
+          </Card>
+        </div>
+
+        {/* BOTTOM RIGHT: CONTROLS (5 cols, 5 rows) */}
+        <div className="col-span-5 row-span-5 flex flex-col gap-4">
+           {/* Auto Toggle */}
+           <button 
+             onClick={toggleAuto}
+             disabled={isEmerg}
+             className={`w-full py-4 rounded-xl font-bold flex items-center justify-center gap-3 transition-all ${
+               isEmerg ? 'bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700' :
+               isAuto ? 'bg-purple-600 hover:bg-purple-700 text-white shadow-lg shadow-purple-900/40 border-t border-purple-400' : 
+               'bg-gray-800 hover:bg-gray-700 text-gray-200 border border-gray-600'
+             }`}
+           >
+              {isAuto ? <Zap size={20} className="fill-current" /> : <Terminal size={20} />}
+              <div className="flex flex-col items-start leading-none">
+                <span className="text-xs opacity-60 font-medium tracking-wider">{isAuto ? 'OPERATOR' : 'ACTIVATE'}</span>
+                <span className="text-lg">{isAuto ? 'AUTO MODE ACTIVE' : 'ENABLE AUTONOMY'}</span>
+              </div>
+           </button>
+
+           {/* D-PAD */}
+           <div className={`flex-1 bg-gray-900 rounded-xl border border-gray-800 p-4 flex items-center justify-center relative ${isAuto || isEmerg ? 'opacity-50 pointer-events-none grayscale' : ''}`}>
+              { (isAuto || isEmerg) && (
+                <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 rounded-xl backdrop-blur-[1px]">
+                  <div className="bg-gray-900 px-3 py-1 rounded border border-gray-700 text-xs font-mono text-gray-400 flex items-center gap-2">
+                    <AlertCircle size={12} /> CONTROLS LOCKED
                   </div>
                 </div>
               )}
-
-              {/* Status Overlays */}
-              <div className="absolute top-4 left-4 flex flex-col gap-1">
-                <div className="flex items-center gap-2 bg-black/60 px-2 py-1 rounded text-red-500 text-xs font-bold animate-pulse">
-                  <div className="w-2 h-2 rounded-full bg-red-500" /> REC
-                </div>
-                <div className="text-xs text-gray-400 font-mono">1280x720 @ 30fps</div>
-              </div>
-            </div>
-          </Card>
-
-          {/* CONTROLS - CRITICAL */}
-          <div className="grid grid-cols-2 gap-4">
-            <Card className="col-span-2 md:col-span-1" title="Movement" icon={Target}>
-              <div className="flex flex-col items-center gap-2 py-2">
-                <button 
-                  onMouseDown={() => handleControl('UP')} 
-                  onMouseUp={() => handleControl('STOP')}
-                  className="w-12 h-12 bg-gray-800 hover:bg-gray-700 active:bg-blue-600 rounded-lg flex items-center justify-center border border-gray-700 transition-colors"
-                >
-                  <ArrowUp size={24} />
-                </button>
-                <div className="flex gap-2">
-                  <button 
-                    onMouseDown={() => handleControl('LEFT')} 
-                    onMouseUp={() => handleControl('STOP')}
-                    className="w-12 h-12 bg-gray-800 hover:bg-gray-700 active:bg-blue-600 rounded-lg flex items-center justify-center border border-gray-700 transition-colors"
-                  >
-                    <ArrowLeft size={24} />
-                  </button>
-                  <button 
-                    onMouseDown={() => handleControl('DOWN')} 
-                    onMouseUp={() => handleControl('STOP')}
-                    className="w-12 h-12 bg-gray-800 hover:bg-gray-700 active:bg-blue-600 rounded-lg flex items-center justify-center border border-gray-700 transition-colors"
-                  >
-                    <ArrowDown size={24} />
-                  </button>
-                  <button 
-                    onMouseDown={() => handleControl('RIGHT')} 
-                    onMouseUp={() => handleControl('STOP')}
-                    className="w-12 h-12 bg-gray-800 hover:bg-gray-700 active:bg-blue-600 rounded-lg flex items-center justify-center border border-gray-700 transition-colors"
-                  >
-                    <ArrowRight size={24} />
-                  </button>
-                </div>
-                <div className="mt-2 text-xs text-gray-500 font-mono">WASD / ARROWS</div>
-              </div>
-            </Card>
-
-            <Card className="col-span-2 md:col-span-1 flex flex-col justify-between" title="Actions" icon={Settings}>
-              <div className="flex flex-col gap-3">
-                <button 
-                  onClick={toggleMode}
-                  className={`flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-bold text-sm transition-all ${
-                    mode === 'AUTONOMOUS' 
-                    ? 'bg-purple-600 hover:bg-purple-700 text-white shadow-[0_0_15px_rgba(147,51,234,0.3)]' 
-                    : 'bg-gray-700 hover:bg-gray-600 text-gray-200'
-                  }`}
-                >
-                   {mode === 'AUTONOMOUS' ? <Zap size={16} /> : <Terminal size={16} />}
-                   {mode === 'AUTONOMOUS' ? 'AUTO MODE' : 'MANUAL MODE'}
-                </button>
-                
-                <button 
-                  onClick={emergencyStop}
-                  className="bg-red-600 hover:bg-red-700 active:scale-95 text-white py-4 px-4 rounded-lg font-bold text-lg flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(220,38,38,0.4)] transition-all border border-red-500"
-                >
-                  <Power size={24} /> E-STOP
-                </button>
-              </div>
-            </Card>
-          </div>
-        </div>
-
-        {/* MIDDLE COLUMN: Sensors & Telemetry (35% on Desktop) */}
-        <div className="md:col-span-4 lg:col-span-4 flex flex-col gap-4">
-          
-          {/* SENSORS - HIGH PRIORITY */}
-          <Card title="Environment Sensors" icon={Layers} color="text-yellow-400">
-            <div className="space-y-4">
               
-              {/* Distance Sensors */}
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs text-gray-400 uppercase font-mono">
-                  <span>Front Distance</span>
-                  <span>{sensors.distanceFront.toFixed(0)} CM</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 bg-gray-800 rounded-full h-3 overflow-hidden">
-                    <div 
-                      className={`h-full transition-all duration-100 ${getDistanceColor(sensors.distanceFront)}`} 
-                      style={{ width: `${Math.min(100, (sensors.distanceFront / 200) * 100)}%` }}
-                    />
-                  </div>
-                  <AlertTriangle size={14} className={sensors.distanceFront < 20 ? "text-red-500 opacity-100" : "opacity-0"} />
-                </div>
+              <div className="grid grid-cols-3 gap-2">
+                 <div />
+                 <button onMouseDown={() => handleControl('forward')} onMouseUp={() => handleControl('stop')} className="w-14 h-14 bg-gray-800 rounded-lg hover:bg-blue-600 active:bg-blue-500 transition-colors flex items-center justify-center"><ArrowUp/></button>
+                 <div />
+                 <button onMouseDown={() => handleControl('left')} onMouseUp={() => handleControl('stop')} className="w-14 h-14 bg-gray-800 rounded-lg hover:bg-blue-600 active:bg-blue-500 transition-colors flex items-center justify-center"><ArrowLeft/></button>
+                 <button onMouseDown={() => handleControl('backward')} onMouseUp={() => handleControl('stop')} className="w-14 h-14 bg-gray-800 rounded-lg hover:bg-blue-600 active:bg-blue-500 transition-colors flex items-center justify-center"><ArrowDown/></button>
+                 <button onMouseDown={() => handleControl('right')} onMouseUp={() => handleControl('stop')} className="w-14 h-14 bg-gray-800 rounded-lg hover:bg-blue-600 active:bg-blue-500 transition-colors flex items-center justify-center"><ArrowRight/></button>
               </div>
-
-              <div className="space-y-2">
-                 <div className="flex justify-between text-xs text-gray-400 uppercase font-mono">
-                  <span>Rear Distance</span>
-                  <span>{sensors.distanceRear.toFixed(0)} CM</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 bg-gray-800 rounded-full h-3 overflow-hidden">
-                    <div 
-                      className={`h-full transition-all duration-100 ${getDistanceColor(sensors.distanceRear)}`} 
-                      style={{ width: `${Math.min(100, (sensors.distanceRear / 200) * 100)}%` }}
-                    />
-                  </div>
-                   <AlertTriangle size={14} className={sensors.distanceRear < 20 ? "text-red-500 opacity-100" : "opacity-0"} />
-                </div>
-              </div>
-
-              <div className="h-px bg-gray-800 my-2"></div>
-
-              {/* Atmospheric Sensors */}
-              <div className="grid grid-cols-2 gap-4">
-                {/* SMOKE/GAS SENSOR - Enhanced */}
-                <div className="col-span-2 bg-gray-800/50 p-4 rounded border border-gray-700/50">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2 text-sm text-gray-400 font-mono">
-                      <Wind size={14} /> SMOKE DETECTION
-                    </div>
-                    <span className={`text-xs px-2 py-1 rounded font-bold ${
-                      sensors.smoke_emergency ? 'bg-red-900 text-red-200 animate-pulse' :
-                      sensors.smoke_warning ? 'bg-orange-900 text-orange-200' :
-                      sensors.gas_detected ? 'bg-yellow-900 text-yellow-200' :
-                      'bg-emerald-900 text-emerald-200'
-                    }`}>
-                      {sensors.smoke_emergency ? '🚨 CRITICAL' :
-                       sensors.smoke_warning ? '⚠️ WARNING' :
-                       sensors.gas_detected ? '⚠️ DETECTED' :
-                       '✓ CLEAR'}
-                    </span>
-                  </div>
-
-                  {/* Gas Level Display */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-2xl font-mono font-bold text-cyan-400">
-                        {sensors.gas_level.toFixed(0)}
-                        <span className="text-xs text-gray-500 ml-2">PPM</span>
-                      </span>
-                      <span className={`text-sm font-mono ${
-                        sensors.gas_trend > 10 ? 'text-red-400' :
-                        sensors.gas_trend > 0 ? 'text-orange-400' :
-                        'text-emerald-400'
-                      }`}>
-                        {sensors.gas_trend > 0 ? '↑ ' : sensors.gas_trend < 0 ? '↓ ' : '→ '}
-                        {Math.abs(sensors.gas_trend).toFixed(1)} PPM
-                      </span>
-                    </div>
-
-                    {/* Visual Progress Bar */}
-                    <div className="space-y-1">
-                      <ProgressBar 
-                        value={Math.min(sensors.gas_level, 4095)} 
-                        max={4095}
-                        color={
-                          sensors.smoke_emergency ? 'bg-red-600' :
-                          sensors.smoke_warning ? 'bg-orange-500' :
-                          sensors.gas_detected ? 'bg-yellow-500' :
-                          'bg-emerald-500'
-                        }
-                        height="h-3"
-                      />
-                      <div className="flex justify-between text-xs text-gray-500">
-                        <span>SAFE</span>
-                        <span>LIGHT</span>
-                        <span>MODERATE</span>
-                        <span>CRITICAL</span>
-                      </div>
-                    </div>
-
-                    {/* Threshold Indicators */}
-                    <div className="grid grid-cols-3 gap-2 text-xs font-mono">
-                      <div className={`p-2 rounded border ${sensors.gas_level > 500 ? 'border-yellow-500 bg-yellow-900/20' : 'border-gray-700 bg-gray-800/30'}`}>
-                        <div className="text-gray-400">Warning</div>
-                        <div className={sensors.gas_level > 2000 ? 'text-yellow-400 font-bold' : 'text-gray-500'}>2000 PPM</div>
-                      </div>
-                      <div className={`p-2 rounded border ${sensors.gas_level > 2000 ? 'border-orange-500 bg-orange-900/20' : 'border-gray-700 bg-gray-800/30'}`}>
-                        <div className="text-gray-400">High</div>
-                        <div className={sensors.gas_level > 3000 ? 'text-orange-400 font-bold' : 'text-gray-500'}>3000 PPM</div>
-                      </div>
-                      <div className={`p-2 rounded border ${sensors.gas_level > 3000 ? 'border-red-500 bg-red-900/20 animate-pulse' : 'border-gray-700 bg-gray-800/30'}`}>
-                        <div className="text-gray-400">Critical</div>
-                        <div className={sensors.smoke_emergency ? 'text-red-400 font-bold' : 'text-gray-500'}>3000+ PPM</div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Temperature Sensor */}
-                <div className="bg-gray-800/50 p-2 rounded border border-gray-700/50">
-                   <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
-                    <Thermometer size={12} /> TEMP
-                  </div>
-                  <div className="text-xl font-mono font-bold text-blue-400">
-                    {sensors.temp.toFixed(1)}°
-                  </div>
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          {/* TELEMETRY GRAPHS - LOW PRIORITY */}
-          <Card title="Telemetry" icon={Activity} color="text-purple-400" className="flex-1 min-h-[200px]">
-             <div className="flex flex-col gap-6 h-full justify-center">
-               <div>
-                  <div className="flex justify-between text-xs text-gray-500 mb-1">
-                    <span>BATTERY DRAIN</span>
-                    <span>{battery.voltage.toFixed(1)}V</span>
-                  </div>
-                  <Sparkline data={history.battery} color="stroke-emerald-500" />
-               </div>
-                <div>
-                  <div className="flex justify-between text-xs text-gray-500 mb-1">
-                    <span>SMOKE LEVEL HISTORY</span>
-                    <span>AVG: {history.gas.length > 0 ? Math.floor(history.gas.reduce((a,b) => a+b) / history.gas.length) : 0} PPM</span>
-                  </div>
-                  <Sparkline data={history.gas} color={sensors.smoke_emergency ? "stroke-red-500" : sensors.smoke_warning ? "stroke-orange-500" : "stroke-yellow-500"} />
-               </div>
-             </div>
-          </Card>
+           </div>
         </div>
 
-        {/* RIGHT COLUMN: Mission & Logs (25% on Desktop) */}
-        <div className="md:col-span-3 lg:col-span-3 flex flex-col gap-4">
-          {/* ESP32 BOARDS STATUS - NEW */}
-          <Card title="ESP32 Boards" icon={Cpu} color="text-green-400">
-            <div className="space-y-3">
-              {Object.entries(espStatus).map(([key, board]) => (
-                <div key={key} className="flex items-center justify-between p-2 bg-gray-800/50 rounded border border-gray-700/50">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-3 h-3 rounded-full ${board.connected ? 'bg-emerald-500 animate-pulse' : 'bg-gray-500'}`} />
-                    <div>
-                      <div className="text-sm font-bold text-gray-200">{board.name}</div>
-                      <div className="text-xs text-gray-500 font-mono">{board.ip}</div>
-                    </div>
-                  </div>
-                  <div className="text-xs text-gray-400">
-                    {board.connected ? '✓ Online' : '✗ Offline'}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-          
-          {/* MINI MAP - MEDIUM PRIORITY */}
-          <Card title="Localization" icon={MapIcon} color="text-blue-400">
-            <div className="aspect-square bg-gray-950 rounded border border-gray-800 relative overflow-hidden">
-               {/* Grid */}
-               <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(#444 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
-               
-               {/* Waypoints */}
-               <div className="absolute top-[30%] left-[60%] w-3 h-3 bg-blue-500/50 rounded-full border border-blue-400"></div>
-               <div className="absolute top-[70%] left-[20%] w-3 h-3 bg-blue-500/50 rounded-full border border-blue-400"></div>
-
-               {/* Robot Marker - Animated */}
-               <div 
-                 className="absolute w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-b-[16px] border-b-emerald-500 transition-all duration-300"
-                 style={{ 
-                   top: '50%', 
-                   left: '50%', 
-                   transform: `translate(-50%, -50%) rotate(${odometry.heading}deg)`
-                 }}
-               ></div>
-               
-               {/* Heading Text */}
-               <div className="absolute bottom-2 right-2 font-mono text-xs text-gray-500">
-                 H: {odometry.heading}°
-               </div>
-            </div>
-          </Card>
-
-          {/* MISSION STATUS - MEDIUM PRIORITY */}
-          <Card title="Mission Status" icon={Target} color="text-green-400">
-             <div className="space-y-3">
-               <div className="flex justify-between items-end">
-                 <span className="text-sm text-gray-300">Waypoint {mission.currentWaypoint}/{mission.totalWaypoints}</span>
-                 <span className="text-xs text-blue-400 font-mono">RUNNING</span>
-               </div>
-               <ProgressBar value={mission.progress} color="bg-blue-500" />
-               <div className="text-xs text-gray-500 flex justify-between">
-                 <span>Dist: 245m</span>
-                 <span>ETA: 4m 12s</span>
-               </div>
-             </div>
-          </Card>
-
-          {/* ALERTS / LOGS - MEDIUM PRIORITY */}
-          <Card title="System Logs" icon={Terminal} color="text-gray-400" className="flex-1 overflow-hidden flex flex-col">
-            <div className="flex-1 overflow-y-auto space-y-2 pr-2 font-mono text-xs h-[200px] scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent">
-              {logs.map((log) => (
-                <div key={log.id} className="flex gap-2 border-l-2 border-gray-700 pl-2 py-0.5">
-                   <span className="text-gray-500 shrink-0">[{log.time}]</span>
-                   <span className={`${log.type === 'critical' ? 'text-red-400 font-bold' : log.type === 'warning' ? 'text-yellow-400' : 'text-gray-300'}`}>
-                     {log.msg}
-                   </span>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-        </div>
       </main>
     </div>
   );

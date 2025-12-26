@@ -95,7 +95,7 @@
 
 // ============================================
 // FRONT ESP32 (MOTOR SLAVE NODE)
-// Role: 4-motor traction control, receives commands via ESP-NOW
+// Role: 4-motor traction control, receives commands via WebSocket
 // ============================================
 #ifdef FRONT_CONTROLLER
 
@@ -157,7 +157,7 @@
 
 // ============================================
 // ESP32-CAM (TELEMETRY BRIDGE + VISION)
-// Role: ESP-NOW receiver, WebSocket server, camera streaming
+// Role: WebSocket client, WebSocket server, camera streaming
 // ============================================
 #ifdef CAMERA_CONTROLLER
 

@@ -9,7 +9,6 @@
 #define WIFI_SSID "ProjectNightfall"
 #define WIFI_PASSWORD "rescue2025"
 #define WIFI_SERVER_PORT 8888
-#define WIFI_CAMERA_PORT 81
 
 // Serial Configuration
 #define SERIAL_BAUD_RATE 115200
@@ -31,21 +30,11 @@
 #define GAS_THRESHOLD_ANALOG 350    // Gas sensor baseline (0-4095) for SafetyMonitor
 #define GAS_THRESHOLD_EMERGENCY 500 // Emergency threshold
 
-// Safety Thresholds (Required by SafetyMonitor)
-#define SAFE_DISTANCE 30.0           // cm - safe operating distance
-#define EMERGENCY_STOP_DISTANCE 15.0 // cm - emergency halt trigger
-#define LOW_BATTERY_VOLTAGE 10.5     // volts (12V system, 10.5V = 87.5%)
-#define MAX_TILT_ANGLE 45.0          // degrees from horizontal (reserved for IMU)
-
 // Safety & Navigation
 #define ENABLE_AUTONOMOUS 1               // Toggle autonomous mode
 #define NAVIGATION_UPDATE_INTERVAL_MS 200 // ms between nav updates
 #define SENSOR_UPDATE_INTERVAL_MS 100     // ms between sensor reads
 #define TELEMETRY_INTERVAL_MS 500         // ms between telemetry broadcasts
-
-// Buzzer Settings
-#define BUZZER_FREQUENCY 2000        // Hz
-#define BUZZER_ALERT_DURATION_MS 100 // ms per alert pulse
 
 // Watchdog & Timing
 #define MAIN_LOOP_RATE_MS 50                 // Main loop target frequency (20 Hz)

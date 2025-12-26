@@ -2,112 +2,90 @@
 #define WIFI_MANAGER_H
 
 #include <Arduino.h>
-#include <WiFi.h>
-#include <AsyncTCP.h>
 #include <ArduinoJson.h>
+#include <map>
 
-// Only include ESPAsyncWebServer if building for back_esp32 (server)
+// Conditional Includes based on Role
 #ifdef BACK_CONTROLLER
-#include <ESPAsyncWebServer.h>
+    #include <WiFi.h>
+    #include <AsyncTCP.h>
+    #include <ESPAsyncWebServer.h>
+#else
+    #include <WiFi.h>
+    #include <WebSocketsClient.h>
 #endif
 
-/**
- * WiFi Client abstraction for Front ESP32 and ESP32-CAM
- * Maintains connection to Back ESP32 server and provides message handlers
- */
-class WiFiClient_Manager
+// ==========================================
+// CLIENT MANAGER (Front ESP32 & Camera)
+// ==========================================
+// Uses arduinoWebSockets (Links2004)
+#ifndef BACK_CONTROLLER
+
+class WSClient_Manager
 {
 public:
-    WiFiClient_Manager(const char *ssid, const char *password, const char *serverIP, uint16_t serverPort);
+    WSClient_Manager(const char *ssid, const char *password, const char *serverIP, uint16_t serverPort, const char *role);
 
     void begin();
-    void update();
+    void update(); // Must be called in loop()
     bool isConnected();
+    bool isWiFiConnected();
 
-    /**
-     * Send JSON message to server
-     */
     void sendMessage(const JsonDocument &doc);
-
-    /**
-     * Register message handler callback
-     */
-    void setMessageHandler(std::function<void(const JsonDocument &)> handler)
-    {
-        _messageHandler = handler;
-    }
-
-    /**
-     * Get connection status
-     */
-    const char *getStatus() { return _isConnected ? "connected" : "disconnected"; }
+    void setMessageHandler(std::function<void(const JsonDocument &)> handler);
 
 private:
     const char *_ssid;
     const char *_password;
     const char *_serverIP;
     uint16_t _serverPort;
-    bool _isConnected;
-    AsyncClient *_client;
-    String _rxBuffer;
-    unsigned long _lastReconnectAttempt;
-
+    const char *_role;
+    
+    bool _wsConnected;
+    unsigned long _lastWiFiCheck;
+    
+    WebSocketsClient _webSocket;
     std::function<void(const JsonDocument &)> _messageHandler;
 
-    void connect();
-    void onData(void *data, size_t len);
-    void onError(uint8_t err);
-    void onDisconnect();
-
-    static constexpr unsigned long RECONNECT_INTERVAL_MS = 5000UL;
+    static void onWebSocketEvent(WStype_t type, uint8_t *payload, size_t length);
 };
 
-/**
- * WiFi Server abstraction for Back ESP32
- * Hosts TCP server for clients to connect
- */
-class WiFiServer_Manager
+#endif
+
+// ==========================================
+// SERVER MANAGER (Back ESP32)
+// ==========================================
+// Uses ESPAsyncWebServer
+#ifdef BACK_CONTROLLER
+
+class WSServer_Manager
 {
 public:
-    WiFiServer_Manager(uint16_t port = 8888);
+    WSServer_Manager(uint16_t port = 8888);
 
     void begin();
-    void update();
+    void update(); // Placeholder for consistency
 
-    /**
-     * Register message handler callback
-     */
-    void setMessageHandler(std::function<void(const JsonDocument &, AsyncClient *)> handler)
-    {
-        _messageHandler = handler;
-    }
-
-    /**
-     * Broadcast message to all connected clients
-     */
     void broadcast(const JsonDocument &doc);
-
-    /**
-     * Send message to specific client
-     */
-    void sendTo(AsyncClient *client, const JsonDocument &doc);
-
-    /**
-     * Get number of connected clients
-     */
-    uint8_t getClientCount() { return _clientCount; }
+    void setMessageHandler(std::function<void(const JsonDocument &, AsyncWebSocketClient *)> handler);
+    
+    // Count connected clients
+    uint8_t getClientCount();
+    String getClientRole(uint32_t id);
+    bool isRoleConnected(const char* role);
 
 private:
-    AsyncServer *_server;
-    uint16_t _port;
-    uint8_t _clientCount;
+    AsyncWebServer _server;
+    AsyncWebSocket _ws;
+    std::function<void(const JsonDocument &, AsyncWebSocketClient *)> _messageHandler;
+    
+    // Map client ID to Role string
+    std::map<uint32_t, String> _clientRoles;
 
-    std::function<void(const JsonDocument &, AsyncClient *)> _messageHandler;
-
-    // Static callback handlers for AsyncServer
-    static void onConnect(void *arg, AsyncClient *client);
-    static void onData(void *arg, AsyncClient *client, void *data, size_t len);
-    static void onDisconnect(void *arg, AsyncClient *client);
+    void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len);
+    void handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocketClient *client);
 };
+
+#endif
 
 #endif // WIFI_MANAGER_H
