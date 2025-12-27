@@ -45,6 +45,7 @@ Autonomy autonomyModule;
 SafetyManager safetyManager;
 SensorManager sensorManager;
 StateMachine fsm;
+EncoderManager encoderManager;  // Phase 3.1
 
 // WebSocket Server (AP + Server)
 WSServer_Manager wsServer(WIFI_SERVER_PORT);
@@ -64,7 +65,10 @@ int frontRightSpeed = 0;
 // Timing
 unsigned long lastNavUpdate = 0;
 unsigned long lastTelemetryBroadcast = 0;
+unsigned long lastEncoderUpdate = 0;  // Phase 3.1: Encoder update timing
 uint16_t g_lastLoopTimeUs = 0;  // Phase 2.5: Loop timing for telemetry
+
+#define ENCODER_UPDATE_INTERVAL_MS 5  // 200Hz
 
 // ============================================
 // FUNCTION DECLARATIONS
@@ -93,6 +97,7 @@ void setup()
     // Initialize components
     initMotors();
     sensorManager.begin();
+    encoderManager.begin();  // Phase 3.1: Initialize PCNT encoders
     initComms();
 
     fsm.setIdle();
@@ -117,6 +122,14 @@ void loop()
 
     // Update Sensors (Non-blocking internal)
     sensorManager.update();
+    
+    // ========================================
+    // ENCODERS (Phase 3.1) - 200Hz update
+    // ========================================
+    if (loopStart - lastEncoderUpdate >= ENCODER_UPDATE_INTERVAL_MS) {
+        lastEncoderUpdate = loopStart;
+        encoderManager.update();
+    }
 
     // ========================================
     // SAFETY FIRST - Check before any control logic
@@ -287,6 +300,17 @@ void broadcastTelemetry()
     // Phase 2.5: Loop timing (from global variable set in loop)
     extern uint16_t g_lastLoopTimeUs;
     data.loopTimeUs = g_lastLoopTimeUs;
+    
+    // Phase 3.1: Encoder telemetry
+    data.wheelRearLeft.counts = encoderManager.getCounts(WHEEL_REAR_LEFT);
+    data.wheelRearLeft.rpm = encoderManager.getRPM(WHEEL_REAR_LEFT);
+    data.wheelRearLeft.distanceCm = encoderManager.getDistanceCm(WHEEL_REAR_LEFT);
+    data.wheelRearLeft.stale = encoderManager.isStale(WHEEL_REAR_LEFT);
+    
+    data.wheelRearRight.counts = encoderManager.getCounts(WHEEL_REAR_RIGHT);
+    data.wheelRearRight.rpm = encoderManager.getRPM(WHEEL_REAR_RIGHT);
+    data.wheelRearRight.distanceCm = encoderManager.getDistanceCm(WHEEL_REAR_RIGHT);
+    data.wheelRearRight.stale = encoderManager.isStale(WHEEL_REAR_RIGHT);
 
     // Build & Send
     Msg::buildTelemetry(doc, data);

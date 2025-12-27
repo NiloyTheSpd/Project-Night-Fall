@@ -70,6 +70,20 @@ namespace Msg
         JsonObject timing = doc.createNestedObject("timing");
         timing["loop_us"] = data.loopTimeUs;
         
+        // Phase 3.1: Encoder telemetry
+        JsonObject encoders = doc.createNestedObject("encoders");
+        JsonObject rearLeft = encoders.createNestedObject("rear_left");
+        rearLeft["counts"] = data.wheelRearLeft.counts;
+        rearLeft["rpm"] = data.wheelRearLeft.rpm;
+        rearLeft["dist_cm"] = data.wheelRearLeft.distanceCm;
+        rearLeft["stale"] = data.wheelRearLeft.stale;
+        
+        JsonObject rearRight = encoders.createNestedObject("rear_right");
+        rearRight["counts"] = data.wheelRearRight.counts;
+        rearRight["rpm"] = data.wheelRearRight.rpm;
+        rearRight["dist_cm"] = data.wheelRearRight.distanceCm;
+        rearRight["stale"] = data.wheelRearRight.stale;
+        
         doc["ts"] = millis();
     }
 

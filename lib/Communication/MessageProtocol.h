@@ -61,6 +61,14 @@ namespace Msg
         float pidI;
         float pidD;
         uint16_t loopTimeUs;
+        
+        // Phase 3.1: Encoder telemetry (rear wheels)
+        struct WheelTelemetry {
+            int32_t counts;
+            float rpm;
+            float distanceCm;
+            bool stale;
+        } wheelRearLeft, wheelRearRight;
     };
 
     struct MotorCmd {
