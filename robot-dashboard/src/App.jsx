@@ -255,11 +255,19 @@ export default function RobotDashboard() {
               <GasGauge value={sensors.gas} trend={history.gas} />
               <div className="flex flex-col gap-4">
                  <DistanceWidget front={sensors.front_dist} rear={sensors.rear_dist} trend={history.front} />
-                 <div className="bg-gray-800/40 rounded-lg p-3 border border-gray-700 flex justify-between items-center">
-                    <span className="text-gray-400 text-xs font-bold">FRONT ESP</span>
-                    <span className={`text-xs font-mono px-2 py-1 rounded ${network.front ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-500'}`}>
-                      {network.front ? 'ONLINE' : 'OFFLINE'}
-                    </span>
+                 <div className="bg-gray-800/40 rounded-lg p-3 border border-gray-700 flex flex-col justify-center gap-2">
+                    <div className="flex justify-between items-center bg-gray-900/50 p-1.5 rounded">
+                       <span className="text-gray-400 text-[10px] font-bold">REAR (HOST)</span>
+                       <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 shadow-[0_0_8px_currentColor]' : 'bg-red-500'}`} />
+                    </div>
+                    <div className="flex justify-between items-center bg-gray-900/50 p-1.5 rounded">
+                       <span className="text-gray-400 text-[10px] font-bold">FRONT ESP</span>
+                       <span className={`w-2 h-2 rounded-full ${network.front ? 'bg-emerald-500 shadow-[0_0_8px_currentColor]' : 'bg-red-500'}`} />
+                    </div>
+                    <div className="flex justify-between items-center bg-gray-900/50 p-1.5 rounded">
+                       <span className="text-gray-400 text-[10px] font-bold">CAMERA ESP</span>
+                       <span className={`w-2 h-2 rounded-full ${network.camera ? 'bg-emerald-500 shadow-[0_0_8px_currentColor]' : 'bg-red-500'}`} />
+                    </div>
                  </div>
               </div>
            </div>
