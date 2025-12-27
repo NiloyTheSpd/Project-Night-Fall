@@ -29,6 +29,7 @@
 #include "SafetyManager.h"
 #include "SensorManager.h"
 #include "StateMachine.h"
+#include "EncoderManager.h"
 
 // ============================================
 // GLOBAL OBJECTS
@@ -36,16 +37,18 @@
 
 // Motors
 L298N rearMotors(
-    MOTOR_REAR_LEFT_ENA, MOTOR_REAR_LEFT_IN1, MOTOR_REAR_LEFT_IN2,
-    MOTOR_REAR_RIGHT_ENB, MOTOR_REAR_RIGHT_IN3, MOTOR_REAR_RIGHT_IN4,
-    PWM_CHANNEL_REAR_LEFT, PWM_CHANNEL_REAR_RIGHT);
+    MOTOR_REAR_L_ENA, MOTOR_REAR_L_IN1, MOTOR_REAR_L_IN2,
+    MOTOR_REAR_R_ENB, MOTOR_REAR_R_IN3, MOTOR_REAR_R_IN4,
+    PWM_CHANNEL_REAR_L, PWM_CHANNEL_REAR_R);
 
 // Modules
 Autonomy autonomyModule;
 SafetyManager safetyManager;
 SensorManager sensorManager;
 StateMachine fsm;
-EncoderManager encoderManager;  // Phase 3.1
+
+// Encoders (Phase 3.1)
+EncoderManager encoderManager;
 
 // WebSocket Server (AP + Server)
 WSServer_Manager wsServer(WIFI_SERVER_PORT);
@@ -65,10 +68,10 @@ int frontRightSpeed = 0;
 // Timing
 unsigned long lastNavUpdate = 0;
 unsigned long lastTelemetryBroadcast = 0;
-unsigned long lastEncoderUpdate = 0;  // Phase 3.1: Encoder update timing
-uint16_t g_lastLoopTimeUs = 0;  // Phase 2.5: Loop timing for telemetry
+unsigned long lastEncoderUpdate = 0; // Phase 3.1: Encoder update timing
+uint16_t g_lastLoopTimeUs = 0;       // Phase 2.5: Loop timing for telemetry
 
-#define ENCODER_UPDATE_INTERVAL_MS 5  // 200Hz
+#define ENCODER_UPDATE_INTERVAL_MS 5 // 200Hz
 
 // ============================================
 // FUNCTION DECLARATIONS
@@ -97,7 +100,7 @@ void setup()
     // Initialize components
     initMotors();
     sensorManager.begin();
-    encoderManager.begin();  // Phase 3.1: Initialize PCNT encoders
+    encoderManager.begin(); // Phase 3.1: Initialize PCNT encoders
     initComms();
 
     fsm.setIdle();
@@ -114,7 +117,7 @@ void setup()
 void loop()
 {
     unsigned long loopStart = millis();
-    unsigned long loopStartUs = micros();  // Phase 2.5: Microsecond timing
+    unsigned long loopStartUs = micros(); // Phase 2.5: Microsecond timing
     esp_task_wdt_reset();
 
     // WS Server Cleanup (Keep Alive)
@@ -122,11 +125,12 @@ void loop()
 
     // Update Sensors (Non-blocking internal)
     sensorManager.update();
-    
+
     // ========================================
     // ENCODERS (Phase 3.1) - 200Hz update
     // ========================================
-    if (loopStart - lastEncoderUpdate >= ENCODER_UPDATE_INTERVAL_MS) {
+    if (loopStart - lastEncoderUpdate >= ENCODER_UPDATE_INTERVAL_MS)
+    {
         lastEncoderUpdate = loopStart;
         encoderManager.update();
     }
@@ -136,28 +140,28 @@ void loop()
     // ========================================
     if (!safetyManager.check(sensorManager.getGasLevel(), sensorManager.getFrontDistance()))
     {
-        if (!fsm.isEmergency()) 
+        if (!fsm.isEmergency())
         {
             // Transition to Emergency
             fsm.triggerEmergency();
-            
+
             rearMotors.stopMotors();
             autonomyModule.reset();
-            autonomyModule.setPIDEnabled(false);  // P1 Fix #1: Disable PID during emergency
+            autonomyModule.setPIDEnabled(false); // P1 Fix #1: Disable PID during emergency
             sendMotorCommandToFront(0, 0);
 
             // P0 Fix #12: Use correct hazard type
-            const char* hazardType = (safetyManager.getHazardType() == HAZARD_GAS) 
-                ? Msg::HAZARD_GAS 
-                : Msg::HAZARD_COLLISION;
+            const char *hazardType = (safetyManager.getHazardType() == HAZARD_GAS)
+                                         ? Msg::HAZARD_GAS
+                                         : Msg::HAZARD_COLLISION;
 
             StaticJsonDocument<256> alert;
             Msg::buildHazardAlert(alert, hazardType, safetyManager.getHazardDescription().c_str());
             wsServer.broadcast(alert);
-            
+
             DEBUG_PRINTLN("[Safety] Hazard Triggered: " + safetyManager.getHazardDescription());
         }
-        
+
         // Skip navigation/telemetry if in emergency
         // Still track loop time and enforce rate limit
         goto end_loop;
@@ -207,10 +211,10 @@ void initComms()
 {
     // Start AP and WebSocket Server
     wsServer.begin();
-    
+
     // Register Callback
     wsServer.setMessageHandler([](const JsonDocument &doc, AsyncWebSocketClient *client)
-                                 { handleWebSocketMessage(doc, client); });
+                               { handleWebSocketMessage(doc, client); });
 }
 
 // ============================================
@@ -233,12 +237,12 @@ void updateAutonomousNav()
 
     // Update Autonomy Module
     autonomyModule.update(sensorManager.getFrontDistance(), sensorManager.getRearDistance());
-    
+
     // Get Results
     navState = autonomyModule.getNavState();
     int leftSpd = autonomyModule.getLeftSpeed();
     int rightSpd = autonomyModule.getRightSpeed();
-    
+
     // Apply to Rear Motors
     rearMotors.setMotors(leftSpd, rightSpd);
 
@@ -263,16 +267,16 @@ void sendMotorCommandToFront(int leftSpeed, int rightSpeed)
     cmd.leftSpeed = leftSpeed;
     cmd.rightSpeed = rightSpeed;
     cmd.target = "front";
-    
+
     Msg::buildMotorCmd(doc, cmd);
-    wsServer.broadcast(doc); 
+    wsServer.broadcast(doc);
 }
 
 void broadcastTelemetry()
 {
-    StaticJsonDocument<1024> doc;  // P2 Fix #9: Increased to 1KB for safety margin
+    StaticJsonDocument<1024> doc; // P2 Fix #9: Increased to 1KB for safety margin
     Msg::TelemetryData data;
-    
+
     // Populate Data
     data.frontDist = sensorManager.getFrontDistance();
     data.rearDist = sensorManager.getRearDistance();
@@ -284,11 +288,11 @@ void broadcastTelemetry()
     data.isAutonomous = fsm.isAutonomous();
     data.navState = autonomyModule.getNavStateName();
     data.clientCount = wsServer.getClientCount();
-    
+
     // Check specific roles
     data.frontOnline = wsServer.isRoleConnected("front");
     data.cameraOnline = wsServer.isRoleConnected("camera");
-    
+
     // Phase 2.5: PID telemetry
     data.pidOutput = autonomyModule.getPIDOutput();
     data.pidError = autonomyModule.getPIDError();
@@ -296,17 +300,17 @@ void broadcastTelemetry()
     data.pidP = autonomyModule.getPIDProportional();
     data.pidI = autonomyModule.getPIDIntegral();
     data.pidD = autonomyModule.getPIDDerivative();
-    
+
     // Phase 2.5: Loop timing (from global variable set in loop)
     extern uint16_t g_lastLoopTimeUs;
     data.loopTimeUs = g_lastLoopTimeUs;
-    
+
     // Phase 3.1: Encoder telemetry
     data.wheelRearLeft.counts = encoderManager.getCounts(WHEEL_REAR_LEFT);
     data.wheelRearLeft.rpm = encoderManager.getRPM(WHEEL_REAR_LEFT);
     data.wheelRearLeft.distanceCm = encoderManager.getDistanceCm(WHEEL_REAR_LEFT);
     data.wheelRearLeft.stale = encoderManager.isStale(WHEEL_REAR_LEFT);
-    
+
     data.wheelRearRight.counts = encoderManager.getCounts(WHEEL_REAR_RIGHT);
     data.wheelRearRight.rpm = encoderManager.getRPM(WHEEL_REAR_RIGHT);
     data.wheelRearRight.distanceCm = encoderManager.getDistanceCm(WHEEL_REAR_RIGHT);
@@ -314,13 +318,14 @@ void broadcastTelemetry()
 
     // Build & Send
     Msg::buildTelemetry(doc, data);
-    
+
     // P2 Fix #9: Check for JSON overflow before sending
-    if (doc.overflowed()) {
+    if (doc.overflowed())
+    {
         DEBUG_PRINTLN("[TELEMETRY] ERROR: JSON overflow!");
-        return;  // Don't broadcast corrupted data
+        return; // Don't broadcast corrupted data
     }
-    
+
     wsServer.broadcast(doc);
 }
 
@@ -344,11 +349,11 @@ void handleWebSocketMessage(const JsonDocument &doc, AsyncWebSocketClient *clien
             fsm.setIdle();
             rearMotors.stopMotors();
             sendMotorCommandToFront(0, 0);
-            autonomyModule.reset();  // Clear PID integral/state
+            autonomyModule.reset(); // Clear PID integral/state
         }
         else if (strcmp(cmd, "forward") == 0)
         {
-            autonomyModule.reset();  // Clear stale PID state
+            autonomyModule.reset(); // Clear stale PID state
             fsm.setManual();
             rearMotors.setMotorsForward(MOTOR_NORMAL_SPEED);
             sendMotorCommandToFront(MOTOR_NORMAL_SPEED, MOTOR_NORMAL_SPEED);
@@ -363,7 +368,7 @@ void handleWebSocketMessage(const JsonDocument &doc, AsyncWebSocketClient *clien
         {
             fsm.setManual();
             // Spin Left: Left Back, Right Forward
-            rearMotors.setMotors(-MOTOR_TURN_SPEED, MOTOR_TURN_SPEED); 
+            rearMotors.setMotors(-MOTOR_TURN_SPEED, MOTOR_TURN_SPEED);
             sendMotorCommandToFront(-MOTOR_TURN_SPEED, MOTOR_TURN_SPEED);
         }
         else if (strcmp(cmd, "right") == 0)
@@ -377,7 +382,7 @@ void handleWebSocketMessage(const JsonDocument &doc, AsyncWebSocketClient *clien
         {
             fsm.setIdle();
             rearMotors.stopMotors();
-            sendMotorCommandToFront(0,0);
+            sendMotorCommandToFront(0, 0);
         }
         else if (strcmp(cmd, "clear_emergency") == 0)
         {
@@ -385,20 +390,20 @@ void handleWebSocketMessage(const JsonDocument &doc, AsyncWebSocketClient *clien
             if (fsm.isEmergency())
             {
                 DEBUG_PRINTLN("[SAFETY] Emergency cleared by operator");
-                
+
                 // Reset safety manager latch
                 safetyManager.reset();
-                
+
                 // Reset FSM to idle
                 fsm.clearEmergency();
-                
+
                 // Re-enable PID for next autonomous run
                 autonomyModule.setPIDEnabled(true);
-                
+
                 // Ensure motors are stopped (safety)
                 rearMotors.stopMotors();
                 sendMotorCommandToFront(0, 0);
-                
+
                 // Broadcast status update
                 StaticJsonDocument<256> alert;
                 Msg::buildStatus(alert, Msg::ROLE_BACK, "emergency_cleared", "Operator reset");
@@ -411,14 +416,14 @@ void handleWebSocketMessage(const JsonDocument &doc, AsyncWebSocketClient *clien
             float kP = doc["kP"] | 4.0f;
             float kI = doc["kI"] | 0.0f;
             float kD = doc["kD"] | 1.0f;
-            
+
             // SAFETY: Clamp to safe ranges
-            kP = constrain(kP, 0.0f, 20.0f);   // Max P prevents oscillation
-            kI = constrain(kI, 0.0f, 2.0f);    // Max I prevents overshoot
-            kD = constrain(kD, 0.0f, 10.0f);   // Max D prevents noise amplification
-            
+            kP = constrain(kP, 0.0f, 20.0f); // Max P prevents oscillation
+            kI = constrain(kI, 0.0f, 2.0f);  // Max I prevents overshoot
+            kD = constrain(kD, 0.0f, 10.0f); // Max D prevents noise amplification
+
             autonomyModule.setApproachPID(kP, kI, kD);
-            
+
             // Acknowledge to dashboard
             StaticJsonDocument<128> ack;
             ack["type"] = "pid_ack";
@@ -426,7 +431,7 @@ void handleWebSocketMessage(const JsonDocument &doc, AsyncWebSocketClient *clien
             ack["kI"] = kI;
             ack["kD"] = kD;
             wsServer.broadcast(ack);
-            
+
             DEBUG_PRINTF("[PID] Tuned: P=%.2f I=%.2f D=%.2f\n", kP, kI, kD);
         }
         else if (strcmp(cmd, "pid_enable") == 0)
@@ -437,4 +442,3 @@ void handleWebSocketMessage(const JsonDocument &doc, AsyncWebSocketClient *clien
         }
     }
 }
-
