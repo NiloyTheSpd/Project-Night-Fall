@@ -16,7 +16,7 @@
 #define MOTOR_REAR_R_IN4 27 // Digital - Right motor direction B ✅
 
 // HC-SR04 Ultrasonic Sensors
-#define US_FRONT_TRIG 15 // Digital output - Trigger pulse ✅ FIXED
+#define US_FRONT_TRIG 14 // Digital output - Trigger pulse ✅ moved off strap GPIO15
 #define US_FRONT_ECHO 18 // Digital input - Echo (with voltage divider!) ✅
 #define US_REAR_TRIG 19  // Digital output - Trigger pulse ✅
 #define US_REAR_ECHO 21  // Digital input - Echo (with voltage divider!) ✅
@@ -94,7 +94,7 @@
 #define FLASH_LED_PIN 4 // Built-in white LED (PWM for brightness) ✅
 
 // Status LED (Optional external)
-#define STATUS_LED_PIN 12 // External LED (via 220Ω resistor) ✅ FIXED
+#define STATUS_LED_PIN 33 // External LED (via 220Ω resistor) ✅ moved off strap GPIO12
 
 // WiFi Configuration (Station/Client)
 #define WIFI_SSID "ProjectNightfall"

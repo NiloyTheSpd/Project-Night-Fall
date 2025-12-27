@@ -1,4 +1,223 @@
-# Project Nightfall - Corrected Wiring Guide
+# Project Nightfall Wiring Guide (Updated)
+
+This guide reflects the current, actual pin connections used by the firmware across all boards:
+
+- Back ESP32 (Master/AP, sensors, rear motors)
+- Front ESP32 (Motor slave)
+- ESP32-CAM (Telemetry client)
+
+It includes boot-strap pin warnings, voltage level requirements, and clear tables for wiring. Follow this exactly for first-time hardware wiring and initial motor validation.
+
+---
+
+## Power & Ground
+
+- Battery → L298N motor supply (e.g., 12V)
+- Buck converter 12V→5V (≥5A) powers logic: Back ESP32, Front ESP32, ESP32-CAM, HC-SR04 sensors, MQ-2.
+- Common ground bus is mandatory:
+  - Battery GND → Buck GND → All ESP32 GND → All sensor GND → All L298N GND.
+
+---
+
+## Boot-Strap Pin Warnings (ESP32)
+
+Certain GPIOs define boot mode at reset. Avoid hard-wiring these pins so they are pulled strongly at boot:
+
+- GPIO0: Boot mode (hold LOW to upload). Keep floating otherwise.
+- GPIO2: Strap (must be high at boot). Avoid external pulls; ensure connected devices are high-impedance at reset.
+- GPIO12: Strap (flash voltage). Do not bias at boot. We moved status LED off this pin.
+- GPIO15: Strap (boot selection). Do not bias at boot. We moved the front ultrasonic trigger off this pin.
+
+Safe reassignments implemented in firmware:
+
+- Ultrasonic front trigger moved to GPIO14.
+- ESP32-CAM external status LED moved to GPIO33.
+- Rear-right encoder moved to GPIO34/35 (input-only, safe).
+
+---
+
+## Back ESP32 (Master/AP, sensors, rear motors)
+
+Role: `BACK_CONTROLLER`
+
+Power: VIN 5V, GND common.
+
+### Rear Motors (L298N)
+
+- Left motor (driver side A):
+  - ENA: GPIO13
+  - IN1: GPIO23
+  - IN2: GPIO22
+- Right motor (driver side B):
+  - ENB: GPIO25
+  - IN3: GPIO26
+  - IN4: GPIO27
+
+### Ultrasonic Sensors (HC-SR04)
+
+- Front:
+  - TRIG: GPIO14
+  - ECHO: GPIO18 (requires 5V→3.3V divider)
+- Rear:
+  - TRIG: GPIO19
+  - ECHO: GPIO21 (requires 5V→3.3V divider)
+
+Voltage divider example (Echo): 1kΩ (top) to Echo, 2kΩ (bottom) to GND → ~3.33V.
+
+### MQ-2 Gas Sensor
+
+- VCC: 5V, GND common
+- Analog out: GPIO32 (ADC1)
+- Digital out: GPIO33
+
+Note: Many MQ-2 modules output up to 5V on analog; ensure analog stays ≤3.3V. If your module’s analog can reach 5V, use a resistor divider to ~3.3V.
+
+### Buzzer
+
+- GPIO4
+
+### Rear Wheel Encoders (PCNT)
+
+- Rear Left:
+  - A: GPIO16
+  - B: GPIO17
+- Rear Right (moved off strap pins):
+  - A: GPIO34
+  - B: GPIO35
+
+---
+
+## Front ESP32 (Motor Slave)
+
+Role: `FRONT_CONTROLLER`
+
+Power: VIN 5V, GND common.
+
+### Motor Drivers (Two L298N boards)
+
+- Driver #1 (Motors 1 & 2):
+  - Motor 1: ENA GPIO13, IN1 GPIO23, IN2 GPIO22
+  - Motor 2: ENB GPIO25, IN3 GPIO26, IN4 GPIO27
+- Driver #2 (Motors 3 & 4):
+  - Motor 3: ENA GPIO14, IN1 GPIO32, IN2 GPIO33
+  - Motor 4: ENB GPIO15, IN3 GPIO19, IN4 GPIO21
+
+Ground L298N GND to ESP32 GND.
+
+---
+
+## ESP32-CAM (Telemetry Client)
+
+Role: `CAMERA_CONTROLLER`
+
+Power: 5V, GND common.
+
+### Status & Flash LEDs
+
+- External status LED: GPIO33 (via 220Ω resistor to LED+ → LED− to GND)
+- Built-in flash LED: GPIO4
+
+### Programming (FTDI)
+
+- FTDI 5V → ESP32-CAM 5V
+- FTDI GND → ESP32-CAM GND
+- FTDI TX → ESP32-CAM RX0 (GPIO3)
+- FTDI RX → ESP32-CAM TX0 (GPIO1)
+- To upload: connect GPIO0 → GND, press reset, upload, then disconnect GPIO0 from GND and reset to boot.
+
+### Camera Pins (Reserved)
+
+The camera uses various GPIOs internally; do not repurpose camera-reserved pins.
+
+---
+
+## Voltage Level Requirements
+
+- ESP32 GPIO logic is 3.3V max.
+- HC-SR04 Echo outputs 5V → must be level-shifted or divided to ~3.3V on GPIO18 and GPIO21.
+- MQ-2 Analog: confirm module analog range; if up to 5V, divide to ≤3.3V for GPIO32.
+- Digital inputs (e.g., MQ-2 digital): ensure 3.3V logic compatibility.
+
+---
+
+## Grounding & Noise Tips
+
+- Single common ground bus reduces measurement noise.
+- Keep sensor grounds close to ESP32 ground reference.
+- Route motor supply separately from logic 5V; avoid sharing thin traces.
+
+---
+
+## Quick Wiring Tables
+
+### Back ESP32 Summary
+
+| Function       | GPIO |
+| -------------- | ---- |
+| Rear Left ENA  | 13   |
+| Rear Left IN1  | 23   |
+| Rear Left IN2  | 22   |
+| Rear Right ENB | 25   |
+| Rear Right IN3 | 26   |
+| Rear Right IN4 | 27   |
+| US Front TRIG  | 14   |
+| US Front ECHO  | 18   |
+| US Rear TRIG   | 19   |
+| US Rear ECHO   | 21   |
+| MQ-2 Analog    | 32   |
+| MQ-2 Digital   | 33   |
+| Buzzer         | 4    |
+| Encoder RL A   | 16   |
+| Encoder RL B   | 17   |
+| Encoder RR A   | 34   |
+| Encoder RR B   | 35   |
+
+### Front ESP32 Summary
+
+| Function    | GPIO |
+| ----------- | ---- |
+| Motor 1 ENA | 13   |
+| Motor 1 IN1 | 23   |
+| Motor 1 IN2 | 22   |
+| Motor 2 ENB | 25   |
+| Motor 2 IN3 | 26   |
+| Motor 2 IN4 | 27   |
+| Motor 3 ENA | 14   |
+| Motor 3 IN1 | 32   |
+| Motor 3 IN2 | 33   |
+| Motor 4 ENB | 15   |
+| Motor 4 IN3 | 19   |
+| Motor 4 IN4 | 21   |
+
+### ESP32-CAM Summary
+
+| Function           | GPIO |
+| ------------------ | ---- |
+| Status LED         | 33   |
+| Flash LED          | 4    |
+| RX0                | 3    |
+| TX0                | 1    |
+| Boot (upload only) | 0    |
+
+---
+
+## Safety Checklist Before Power-Up
+
+- Wheels off ground OR disconnect motor 12V.
+- All grounds connected to common bus.
+- Ultrasonic Echo dividers installed (GPIO18, GPIO21).
+- ESP32-CAM GPIO0 disconnected from GND (after programming).
+- No shorts between VCC and GND (check with multimeter).
+- Battery voltage ≥ 11.5V; buck converter 5V stable.
+
+---
+
+## Notes
+
+- If you must use strap pins, ensure connected devices are high-impedance at reset or add series resistors (1–4.7 kΩ).
+- IMU: Not wired in current firmware; if planned, choose non-strap pins and 3.3V logic.
+
+This guide matches the current codebase (pins in `include/pins.h` and encoders in `lib/Encoders/EncoderManager.cpp`).# Project Nightfall - Corrected Wiring Guide
 
 ## Pure WiFi Architecture (3 ESP32s)
 
