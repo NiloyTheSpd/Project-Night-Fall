@@ -64,6 +64,7 @@ int frontRightSpeed = 0;
 // Timing
 unsigned long lastNavUpdate = 0;
 unsigned long lastTelemetryBroadcast = 0;
+uint16_t g_lastLoopTimeUs = 0;  // Phase 2.5: Loop timing for telemetry
 
 // ============================================
 // FUNCTION DECLARATIONS
@@ -108,6 +109,7 @@ void setup()
 void loop()
 {
     unsigned long loopStart = millis();
+    unsigned long loopStartUs = micros();  // Phase 2.5: Microsecond timing
     esp_task_wdt_reset();
 
     // WS Server Cleanup (Keep Alive)
@@ -116,7 +118,41 @@ void loop()
     // Update Sensors (Non-blocking internal)
     sensorManager.update();
 
-    // Update navigation at fixed interval
+    // ========================================
+    // SAFETY FIRST - Check before any control logic
+    // ========================================
+    if (!safetyManager.check(sensorManager.getGasLevel(), sensorManager.getFrontDistance()))
+    {
+        if (!fsm.isEmergency()) 
+        {
+            // Transition to Emergency
+            fsm.triggerEmergency();
+            
+            rearMotors.stopMotors();
+            autonomyModule.reset();
+            autonomyModule.setPIDEnabled(false);  // P1 Fix #1: Disable PID during emergency
+            sendMotorCommandToFront(0, 0);
+
+            // P0 Fix #12: Use correct hazard type
+            const char* hazardType = (safetyManager.getHazardType() == HAZARD_GAS) 
+                ? Msg::HAZARD_GAS 
+                : Msg::HAZARD_COLLISION;
+
+            StaticJsonDocument<256> alert;
+            Msg::buildHazardAlert(alert, hazardType, safetyManager.getHazardDescription().c_str());
+            wsServer.broadcast(alert);
+            
+            DEBUG_PRINTLN("[Safety] Hazard Triggered: " + safetyManager.getHazardDescription());
+        }
+        
+        // Skip navigation/telemetry if in emergency
+        // Still track loop time and enforce rate limit
+        goto end_loop;
+    }
+
+    // ========================================
+    // NAVIGATION - Only if safe
+    // ========================================
     if (fsm.isAutonomous() && (loopStart - lastNavUpdate >= NAVIGATION_UPDATE_INTERVAL_MS))
     {
         lastNavUpdate = loopStart;
@@ -130,25 +166,10 @@ void loop()
         broadcastTelemetry();
     }
 
-    // Safety Check
-    if (!safetyManager.check(sensorManager.getGasLevel(), sensorManager.getFrontDistance()))
-    {
-        if (!fsm.isEmergency()) 
-        {
-            // Transition to Emergency
-            fsm.triggerEmergency();
-            
-            rearMotors.stopMotors();
-            autonomyModule.reset();
-            sendMotorCommandToFront(0, 0);
-
-            StaticJsonDocument<256> alert;
-            Msg::buildHazardAlert(alert, Msg::HAZARD_GAS, safetyManager.getHazardDescription().c_str());
-            wsServer.broadcast(alert);
-            
-            DEBUG_PRINTLN("[Safety] Hazard Triggered: " + safetyManager.getHazardDescription());
-        }
-    }
+end_loop:
+    // Phase 2.5: Track loop execution time
+    unsigned long loopEndUs = micros();
+    g_lastLoopTimeUs = (uint16_t)(loopEndUs - loopStartUs);
 
     // Frame rate limiting
     unsigned long loopDuration = millis() - loopStart;
@@ -236,7 +257,7 @@ void sendMotorCommandToFront(int leftSpeed, int rightSpeed)
 
 void broadcastTelemetry()
 {
-    StaticJsonDocument<512> doc;
+    StaticJsonDocument<1024> doc;  // P2 Fix #9: Increased to 1KB for safety margin
     Msg::TelemetryData data;
     
     // Populate Data
@@ -248,15 +269,34 @@ void broadcastTelemetry()
     data.rearLeftSpeed = rearLeftSpeed;
     data.rearRightSpeed = rearRightSpeed;
     data.isAutonomous = fsm.isAutonomous();
-    data.navState = (navState == NAV_FORWARD ? "forward" : "idle"); // Simplified mapping for now
+    data.navState = autonomyModule.getNavStateName();
     data.clientCount = wsServer.getClientCount();
     
     // Check specific roles
     data.frontOnline = wsServer.isRoleConnected("front");
     data.cameraOnline = wsServer.isRoleConnected("camera");
+    
+    // Phase 2.5: PID telemetry
+    data.pidOutput = autonomyModule.getPIDOutput();
+    data.pidError = autonomyModule.getPIDError();
+    data.pidSetpoint = autonomyModule.getPIDSetpoint();
+    data.pidP = autonomyModule.getPIDProportional();
+    data.pidI = autonomyModule.getPIDIntegral();
+    data.pidD = autonomyModule.getPIDDerivative();
+    
+    // Phase 2.5: Loop timing (from global variable set in loop)
+    extern uint16_t g_lastLoopTimeUs;
+    data.loopTimeUs = g_lastLoopTimeUs;
 
     // Build & Send
     Msg::buildTelemetry(doc, data);
+    
+    // P2 Fix #9: Check for JSON overflow before sending
+    if (doc.overflowed()) {
+        DEBUG_PRINTLN("[TELEMETRY] ERROR: JSON overflow!");
+        return;  // Don't broadcast corrupted data
+    }
+    
     wsServer.broadcast(doc);
 }
 
@@ -279,10 +319,12 @@ void handleWebSocketMessage(const JsonDocument &doc, AsyncWebSocketClient *clien
         {
             fsm.setIdle();
             rearMotors.stopMotors();
-            sendMotorCommandToFront(0, 0); 
+            sendMotorCommandToFront(0, 0);
+            autonomyModule.reset();  // Clear PID integral/state
         }
         else if (strcmp(cmd, "forward") == 0)
         {
+            autonomyModule.reset();  // Clear stale PID state
             fsm.setManual();
             rearMotors.setMotorsForward(MOTOR_NORMAL_SPEED);
             sendMotorCommandToFront(MOTOR_NORMAL_SPEED, MOTOR_NORMAL_SPEED);
@@ -312,6 +354,62 @@ void handleWebSocketMessage(const JsonDocument &doc, AsyncWebSocketClient *clien
             fsm.setIdle();
             rearMotors.stopMotors();
             sendMotorCommandToFront(0,0);
+        }
+        else if (strcmp(cmd, "clear_emergency") == 0)
+        {
+            // Only allow reset if actually in emergency state
+            if (fsm.isEmergency())
+            {
+                DEBUG_PRINTLN("[SAFETY] Emergency cleared by operator");
+                
+                // Reset safety manager latch
+                safetyManager.reset();
+                
+                // Reset FSM to idle
+                fsm.clearEmergency();
+                
+                // Re-enable PID for next autonomous run
+                autonomyModule.setPIDEnabled(true);
+                
+                // Ensure motors are stopped (safety)
+                rearMotors.stopMotors();
+                sendMotorCommandToFront(0, 0);
+                
+                // Broadcast status update
+                StaticJsonDocument<256> alert;
+                Msg::buildStatus(alert, Msg::ROLE_BACK, "emergency_cleared", "Operator reset");
+                wsServer.broadcast(alert);
+            }
+        }
+        else if (strcmp(cmd, "pid_tune") == 0)
+        {
+            // Extract with defaults
+            float kP = doc["kP"] | 4.0f;
+            float kI = doc["kI"] | 0.0f;
+            float kD = doc["kD"] | 1.0f;
+            
+            // SAFETY: Clamp to safe ranges
+            kP = constrain(kP, 0.0f, 20.0f);   // Max P prevents oscillation
+            kI = constrain(kI, 0.0f, 2.0f);    // Max I prevents overshoot
+            kD = constrain(kD, 0.0f, 10.0f);   // Max D prevents noise amplification
+            
+            autonomyModule.setApproachPID(kP, kI, kD);
+            
+            // Acknowledge to dashboard
+            StaticJsonDocument<128> ack;
+            ack["type"] = "pid_ack";
+            ack["kP"] = kP;
+            ack["kI"] = kI;
+            ack["kD"] = kD;
+            wsServer.broadcast(ack);
+            
+            DEBUG_PRINTF("[PID] Tuned: P=%.2f I=%.2f D=%.2f\n", kP, kI, kD);
+        }
+        else if (strcmp(cmd, "pid_enable") == 0)
+        {
+            bool enable = doc["enable"] | true;
+            autonomyModule.setPIDEnabled(enable);
+            DEBUG_PRINTF("[PID] %s\n", enable ? "Enabled" : "Disabled");
         }
     }
 }

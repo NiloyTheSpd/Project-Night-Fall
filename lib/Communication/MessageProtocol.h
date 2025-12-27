@@ -52,6 +52,15 @@ namespace Msg
         int clientCount;
         bool frontOnline;
         bool cameraOnline;
+        
+        // Control debug (Phase 2.5)
+        float pidOutput;
+        float pidError;
+        float pidSetpoint;
+        float pidP;
+        float pidI;
+        float pidD;
+        uint16_t loopTimeUs;
     };
 
     struct MotorCmd {

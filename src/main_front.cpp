@@ -44,6 +44,12 @@ WSClient_Manager wsClient(WIFI_SSID, WIFI_PASSWORD, "192.168.4.1", WIFI_SERVER_P
 bool isConnected = false;
 unsigned long lastStatusReport = 0;
 
+// Motor Safety Timeout
+// If no motor command received within this time, stop all motors
+const unsigned long MOTOR_CMD_TIMEOUT_MS = 1000;
+unsigned long lastMotorCmdTime = 0;
+bool motorsTimedOut = false;
+
 // ============================================
 // FUNCTIONS
 // ============================================
@@ -87,6 +93,33 @@ void loop()
 
     unsigned long now = millis();
 
+    // ========================================
+    // SAFETY: Motor Command Timeout
+    // ========================================
+    // If motors are running and we haven't received a command recently,
+    // stop them to prevent runaway if connection is lost.
+    if (lastMotorCmdTime > 0)  // Only check if we've received at least one command
+    {
+        bool isTimedOut = (now - lastMotorCmdTime >= MOTOR_CMD_TIMEOUT_MS);
+        bool motorsRunning = frontMotorsBank1.isMoving() || frontMotorsBank2.isMoving();
+        
+        if (isTimedOut && motorsRunning)
+        {
+            frontMotorsBank1.stopMotors();
+            frontMotorsBank2.stopMotors();
+            
+            if (!motorsTimedOut)  // Log only once per timeout event
+            {
+                motorsTimedOut = true;
+                DEBUG_PRINTLN("[SAFETY] Motor timeout - no command received, stopping motors!");
+            }
+        }
+        else if (!isTimedOut)
+        {
+            motorsTimedOut = false;  // Reset flag when commands resume
+        }
+    }
+
     // Report status periodically
     if (now - lastStatusReport >= TELEMETRY_INTERVAL_MS)
     {
@@ -110,6 +143,19 @@ void initMotors()
 
 void handleWebSocketMessage(const JsonDocument &doc)
 {
+    const char *msgType = doc["type"] | "";
+    
+    // P0 Fix #3: Handle emergency broadcasts immediately
+    if (strcmp(msgType, "hazard_alert") == 0)
+    {
+        // Immediate stop on any hazard from master
+        frontMotorsBank1.stopMotors();
+        frontMotorsBank2.stopMotors();
+        lastMotorCmdTime = 0;  // Reset timeout so motors stay stopped
+        DEBUG_PRINTLN("[SAFETY] Hazard alert received, motors stopped");
+        return;
+    }
+    
     Msg::MotorCmd cmd;
     
     // Try Parsing Motor Command
@@ -125,6 +171,9 @@ void handleWebSocketMessage(const JsonDocument &doc)
 
 void handleMotorCommand(int left, int right)
 {
+    // Reset timeout timer on every valid command
+    lastMotorCmdTime = millis();
+    
     // Apply to both banks (4 motors total)
     frontMotorsBank1.setMotors(left, right);
     frontMotorsBank2.setMotors(left, right);

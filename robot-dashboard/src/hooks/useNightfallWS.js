@@ -31,6 +31,17 @@ export const useNightfallWS = () => {
       front: false,
       camera: false
     },
+    control: {
+      out: 0,
+      err: 0,
+      sp: 0,
+      P: 0,
+      I: 0,
+      D: 0
+    },
+    timing: {
+      loop_us: 0
+    },
     server_clients: 0,
     lastUpdate: 0
   });
@@ -103,6 +114,8 @@ export const useNightfallWS = () => {
             motors: data.motors || prev.motors,
             state: data.state || prev.state,
             network: data.network || prev.network,
+            control: data.control || prev.control,
+            timing: data.timing || prev.timing,
             server_clients: data.server_clients || 0,
             lastUpdate: now
           }));
@@ -155,8 +168,8 @@ export const useNightfallWS = () => {
     }
   }, []);
 
-  const sendUiCmd = useCallback((cmdString) => {
-    sendCommand('ui_cmd', { cmd: cmdString });
+  const sendUiCmd = useCallback((cmdString, payload = {}) => {
+    sendCommand('ui_cmd', { cmd: cmdString, ...payload });
   }, [sendCommand]);
 
   useEffect(() => {

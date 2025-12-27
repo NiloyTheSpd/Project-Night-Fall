@@ -4,7 +4,8 @@ SensorManager::SensorManager()
     : _frontSensor(ULTRASONIC_FRONT_TRIG, ULTRASONIC_FRONT_ECHO),
       _rearSensor(ULTRASONIC_REAR_TRIG, ULTRASONIC_REAR_ECHO),
       _gasSensor(GAS_SENSOR_ANALOG, GAS_SENSOR_DIGITAL),
-      _frontDist(0), _rearDist(0), _gasLevel(0), _lastUpdate(0)
+      _frontDist(0), _rearDist(0), _gasLevel(0), 
+      _lastUpdate(0), _readFrontNext(true)
 {
 }
 
@@ -18,23 +19,40 @@ void SensorManager::begin()
 void SensorManager::update()
 {
     unsigned long now = millis();
-    if (now - _lastUpdate >= SENSOR_UPDATE_INTERVAL_MS)
+    
+    // Staggered ultrasonic updates to prevent crosstalk
+    // Each sensor updates at half the rate, but they alternate
+    // Result: Same effective update rate per sensor, no interference
+    const unsigned long STAGGER_INTERVAL = SENSOR_UPDATE_INTERVAL_MS / 2;  // 50ms each
+    
+    if (now - _lastUpdate >= STAGGER_INTERVAL)
     {
         _lastUpdate = now;
 
-        // Trigger updates
-        _frontSensor.update();
-        _rearSensor.update();
+        // Alternate between front and rear ultrasonic
+        if (_readFrontNext)
+        {
+            _frontSensor.update();
+            float reading = _frontSensor.getDistance();
+            if (reading > 0) {
+                _frontDist = reading;
+            }
+            // else: keep last valid reading
+        }
+        else
+        {
+            _rearSensor.update();
+            float reading = _rearSensor.getDistance();
+            if (reading > 0) {
+                _rearDist = reading;
+            }
+        }
+        
+        _readFrontNext = !_readFrontNext;  // Toggle for next update
+        
+        // Gas sensor updates every cycle (no interference with ultrasonics)
         _gasSensor.update();
-
-        // Cache values
-        _frontDist = _frontSensor.getDistance();
-        _rearDist = _rearSensor.getDistance();
         _gasLevel = _gasSensor.getSmoothedReading();
-
-        // Basic Filtering (e.g. clamp negative or invalid)
-        if (_frontDist < 0) _frontDist = 0;
-        if (_rearDist < 0) _rearDist = 0;
     }
 }
 

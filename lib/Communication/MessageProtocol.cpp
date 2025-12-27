@@ -57,6 +57,19 @@ namespace Msg
         network["front"] = data.frontOnline;
         network["camera"] = data.cameraOnline;
         
+        // Control debug (Phase 2.5)
+        JsonObject control = doc.createNestedObject("control");
+        control["out"] = data.pidOutput;
+        control["err"] = data.pidError;
+        control["sp"] = data.pidSetpoint;
+        control["P"] = data.pidP;
+        control["I"] = data.pidI;
+        control["D"] = data.pidD;
+        
+        // Timing
+        JsonObject timing = doc.createNestedObject("timing");
+        timing["loop_us"] = data.loopTimeUs;
+        
         doc["ts"] = millis();
     }
 
@@ -99,6 +112,10 @@ namespace Msg
         outCmd.target = doc["target"].as<String>();
         outCmd.leftSpeed = doc["left"] | 0;
         outCmd.rightSpeed = doc["right"] | 0;
+        
+        // P0 Fix #5: VALIDATION - Clamp motor speeds to safe range
+        outCmd.leftSpeed = constrain(outCmd.leftSpeed, -255, 255);
+        outCmd.rightSpeed = constrain(outCmd.rightSpeed, -255, 255);
         
         return true;
     }

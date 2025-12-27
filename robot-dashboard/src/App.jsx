@@ -5,6 +5,7 @@ import {
   Layers, Radio, Gauge, AlertCircle, Clock
 } from 'lucide-react';
 import { useNightfallWS } from './hooks/useNightfallWS';
+import PIDTuner from './components/PIDTuner';
 
 // --- Utility Components ---
 
@@ -220,6 +221,21 @@ export default function RobotDashboard() {
             </div>
           </div>
           
+          {/* EMERGENCY RESET - Only visible during emergency */}
+          {isEmerg && (
+            <button 
+              onClick={() => {
+                if (window.confirm("Clear EMERGENCY state and return to IDLE?")) {
+                  sendUiCmd('clear_emergency');
+                  addLog('User cleared EMERGENCY state', 'warn');
+                }
+              }}
+              className="bg-yellow-500 hover:bg-yellow-600 active:scale-95 text-black px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 shadow-[0_0_10px_rgba(234,179,8,0.4)] border border-yellow-400 transition-all animate-pulse"
+            >
+              <AlertTriangle size={18} /> RESET EMERGENCY
+            </button>
+          )}
+          
           <button 
            onClick={handleEstop}
            className="bg-red-600 hover:bg-red-700 active:scale-95 text-white px-6 py-2 rounded-lg font-bold text-lg flex items-center gap-2 shadow-[0_0_15px_rgba(220,38,38,0.5)] border border-red-500 transition-all"
@@ -258,7 +274,7 @@ export default function RobotDashboard() {
                  <div className="bg-gray-800/40 rounded-lg p-3 border border-gray-700 flex flex-col justify-center gap-2">
                     <div className="flex justify-between items-center bg-gray-900/50 p-1.5 rounded">
                        <span className="text-gray-400 text-[10px] font-bold">REAR (HOST)</span>
-                       <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 shadow-[0_0_8px_currentColor]' : 'bg-red-500'}`} />
+                       <span className={`w-2 h-2 rounded-full ${connectionStatus === 'connected' ? 'bg-emerald-500 shadow-[0_0_8px_currentColor]' : 'bg-red-500'}`} />
                     </div>
                     <div className="flex justify-between items-center bg-gray-900/50 p-1.5 rounded">
                        <span className="text-gray-400 text-[10px] font-bold">FRONT ESP</span>
@@ -294,8 +310,17 @@ export default function RobotDashboard() {
            </Card>
         </div>
 
-        {/* BOTTOM: LOGS (7 cols, 5 rows) */}
-        <div className="col-span-7 row-span-5 relative">
+        {/* BOTTOM LEFT: PID Tuner (3 cols, 5 rows) */}
+        <div className="col-span-3 row-span-5">
+          <PIDTuner 
+            sendUiCmd={sendUiCmd} 
+            telemetry={telemetry} 
+            isConnected={connectionStatus === 'connected'} 
+          />
+        </div>
+
+        {/* BOTTOM MIDDLE: LOGS (4 cols, 5 rows) */}
+        <div className="col-span-4 row-span-5 relative">
           <Card title="Mission Log" icon={Terminal} className="h-full">
              <div className="flex-1 overflow-y-auto font-mono text-[11px] space-y-1 pr-2 max-h-[220px] scrollbar-thin scrollbar-thumb-gray-800">
                {logs.length === 0 && <div className="text-gray-600 italic p-4 text-center">System Ready. Waiting for events...</div>}

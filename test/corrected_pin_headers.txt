@@ -5,7 +5,7 @@
 // ============================================
 // BACK ESP32 (Master/Brain/Sensor Node)
 // ============================================
-#ifdef BACK_CONTROLLER
+#ifdef BACK_ESP32
 
 // L298N Motor Driver (Rear Motors)
 #define MOTOR_REAR_L_ENA  13  // PWM - Left motor speed ✅
@@ -39,12 +39,12 @@
 #define PWM_CHANNEL_REAR_R  1
 #define PWM_CHANNEL_BUZZER  2
 
-#endif // BACK_CONTROLLER
+#endif // BACK_ESP32
 
 // ============================================
 // FRONT ESP32 (Motor Slave Node)
 // ============================================
-#ifdef FRONT_CONTROLLER
+#ifdef FRONT_ESP32
 
 // L298N Motor Driver #1 (Motors 1 & 2)
 #define MOTOR_1_ENA       13  // PWM - Motor 1 speed ✅
@@ -73,18 +73,18 @@
 #define PWM_CHANNEL_M3    2
 #define PWM_CHANNEL_M4    3
 
-#endif // FRONT_CONTROLLER
+#endif // FRONT_ESP32
 
 // ============================================
 // CAMERA ESP32 (ESP32-CAM Telemetry Bridge)
 // ============================================
-#ifdef CAMERA_CONTROLLER
+#ifdef CAMERA_ESP32
 
 // Built-in Flash LED
-#define FLASH_LED_PIN      4  // Built-in white LED (PWM for brightness) ✅
+#define FLASH_LED          4  // Built-in white LED (PWM for brightness) ✅
 
 // Status LED (Optional external)
-#define STATUS_LED_PIN    12  // External LED (via 220Ω resistor) ✅ FIXED
+#define STATUS_LED        12  // External LED (via 220Ω resistor) ✅ FIXED
 
 // WiFi Configuration (Station/Client)
 #define WIFI_SSID         "ProjectNightfall"
@@ -100,7 +100,7 @@
 #define UART_RX            3  // RX0 - Connect to FTDI TX
 #define GPIO_BOOT          0  // Hold LOW during programming
 
-#endif // CAMERA_CONTROLLER
+#endif // CAMERA_ESP32
 
 // ============================================
 // COMMON DEFINITIONS
@@ -133,3 +133,53 @@
 #define MSG_TYPE_COMMAND  "command"
 
 #endif // PINS_H
+
+// ============================================
+// PIN USAGE NOTES
+// ============================================
+/*
+STRAPPING PINS (Avoided in this design):
+  - GPIO 0:  Boot mode (LOW = download, HIGH = normal)
+  - GPIO 2:  Boot mode (must be LOW/floating during boot)
+  - GPIO 5:  Boot mode (VSPI SS)
+  - GPIO 12: Boot voltage (must be LOW during boot)
+  - GPIO 15: Boot mode (must be HIGH during boot)
+
+ADC1 PINS (Can be used with WiFi):
+  - GPIO 32-39: ADC1_CH0 to ADC1_CH7 ✅
+
+ADC2 PINS (Cannot be used with WiFi):
+  - GPIO 0, 2, 4, 12-15, 25-27: ADC2 channels ⚠️
+
+PWM-CAPABLE PINS (All GPIOs except input-only):
+  - All GPIO 0-33 can do PWM ✅
+  - GPIO 34-39 are INPUT ONLY ❌
+
+INPUT-ONLY PINS (No PWM, no pull-ups):
+  - GPIO 34, 35, 36, 39: Use for analog sensors only
+
+SAFE GENERAL-PURPOSE PINS:
+  - GPIO 13, 14, 15, 18, 19, 21, 22, 23, 25, 26, 27, 32, 33 ✅
+
+UART PINS (Reserved if using Serial):
+  - GPIO 1 (TX0), GPIO 3 (RX0): Serial Monitor
+  - GPIO 16 (RX2), GPIO 17 (TX2): Serial2 (if needed)
+
+I2C PINS (Default):
+  - GPIO 21 (SDA), GPIO 22 (SCL): Use if adding I2C sensors
+
+SPI PINS (Default VSPI):
+  - GPIO 23 (MOSI), GPIO 19 (MISO), GPIO 18 (SCK), GPIO 5 (SS)
+
+ECHO PIN PROTECTION REQUIRED:
+  HC-SR04 outputs 5V but ESP32 GPIO max is 3.3V!
+  Use voltage divider:
+    HC-SR04 Echo → 1kΩ → ESP32 GPIO
+                      └→ 2kΩ → GND
+  Result: 5V × (2kΩ/3kΩ) = 3.33V ✅
+
+L298N JUMPER CONFIGURATION:
+  - REMOVE ENA jumper: Enables PWM speed control
+  - REMOVE ENB jumper: Enables PWM speed control
+  - Keep jumpers = Full speed only (no speed control)
+*/

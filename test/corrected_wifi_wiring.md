@@ -1,5 +1,4 @@
 # Project Nightfall - Corrected Wiring Guide
-
 ## Pure WiFi Architecture (3 ESP32s)
 
 **Version:** 4.0 - WiFi Architecture with Safe Pin Assignments  
@@ -28,7 +27,6 @@
 ```
 
 **Key Advantages:**
-
 - ✅ No physical UART wiring needed
 - ✅ All boards on same WiFi network
 - ✅ Dashboard connects to same AP
@@ -63,7 +61,6 @@ Common Ground Bus (CRITICAL):
 ```
 
 **Power Requirements:**
-
 - **ESP32 × 3:** 1.5A total (500mA each)
 - **Motors × 6:** 12-18A peak (2-3A each under load)
 - **Sensors:** 0.2A total
@@ -71,7 +68,6 @@ Common Ground Bus (CRITICAL):
 - **TOTAL PEAK:** 18-22A
 
 **Recommended Components:**
-
 - Battery: 12V 10Ah (not 5Ah!)
 - Fuse: 20A fast-blow (not 10A!)
 - Buck Converter: 5V 5A rated (not 3A!)
@@ -82,7 +78,6 @@ Common Ground Bus (CRITICAL):
 ## 📟 Back ESP32 (Master/Brain) - CORRECTED PINS
 
 ### Role
-
 - **WiFi:** Access Point "ProjectNightfall"
 - **WebSocket:** Server on port 8888
 - **Controls:** Rear motors (2), All sensors, FSM logic
@@ -90,31 +85,31 @@ Common Ground Bus (CRITICAL):
 
 ### Safe Pin Assignments ✅
 
-| Function              | Pin  | GPIO | Wire To                       | Notes                |
-| --------------------- | ---- | ---- | ----------------------------- | -------------------- |
-| **L298N Rear Driver** |      |      |                               |                      |
-| Left Motor Speed      | ENA  | 13   | L298N ENA                     | PWM 0-255 ✅         |
-| Left Motor Dir A      | IN1  | 23   | L298N IN1                     | ✅ Changed from 12   |
-| Left Motor Dir B      | IN2  | 22   | L298N IN2                     | ✅ Changed from 14   |
-| Right Motor Speed     | ENB  | 25   | L298N ENB                     | PWM 0-255 ✅         |
-| Right Motor Dir A     | IN3  | 26   | L298N IN3                     | ✅                   |
-| Right Motor Dir B     | IN4  | 27   | L298N IN4                     | ✅                   |
-| **Front Ultrasonic**  |      |      |                               |                      |
-| Trigger               | TRIG | 15   | HC-SR04 Trig                  | ✅ Changed from 5    |
-| Echo                  | ECHO | 18   | HC-SR04 Echo + Divider        | ✅ See circuit below |
-| **Rear Ultrasonic**   |      |      |                               |                      |
-| Trigger               | TRIG | 19   | HC-SR04 Trig                  | ✅                   |
-| Echo                  | ECHO | 21   | HC-SR04 Echo + Divider        | ✅ See circuit below |
-| **MQ-2 Gas Sensor**   |      |      |                               |                      |
-| Analog                | A0   | 32   | MQ-2 A0                       | ADC1 (0-4095) ✅     |
-| Digital               | D0   | 33   | MQ-2 D0                       | Optional ✅          |
-| **Buzzer**            |      |      |                               |                      |
-| Output                | PWM  | 4    | Buzzer+ via 220Ω              | ✅ Changed from 2    |
-| **WiFi**              |      |      |                               |                      |
-| Built-in              | -    | -    | Creates AP "ProjectNightfall" | -                    |
-| **Power**             |      |      |                               |                      |
-| VIN                   | 5V   | VIN  | Buck converter +5V            | ✅                   |
-| GND                   | GND  | GND  | Common ground                 | **CRITICAL**         |
+| Function | Pin | GPIO | Wire To | Notes |
+|----------|-----|------|---------|-------|
+| **L298N Rear Driver** | | | |
+| Left Motor Speed | ENA | 13 | L298N ENA | PWM 0-255 ✅ |
+| Left Motor Dir A | IN1 | 23 | L298N IN1 | ✅ Changed from 12 |
+| Left Motor Dir B | IN2 | 22 | L298N IN2 | ✅ Changed from 14 |
+| Right Motor Speed | ENB | 25 | L298N ENB | PWM 0-255 ✅ |
+| Right Motor Dir A | IN3 | 26 | L298N IN3 | ✅ |
+| Right Motor Dir B | IN4 | 27 | L298N IN4 | ✅ |
+| **Front Ultrasonic** | | | |
+| Trigger | TRIG | 15 | HC-SR04 Trig | ✅ Changed from 5 |
+| Echo | ECHO | 18 | HC-SR04 Echo + Divider | ✅ See circuit below |
+| **Rear Ultrasonic** | | | |
+| Trigger | TRIG | 19 | HC-SR04 Trig | ✅ |
+| Echo | ECHO | 21 | HC-SR04 Echo + Divider | ✅ See circuit below |
+| **MQ-2 Gas Sensor** | | | |
+| Analog | A0 | 32 | MQ-2 A0 | ADC1 (0-4095) ✅ |
+| Digital | D0 | 33 | MQ-2 D0 | Optional ✅ |
+| **Buzzer** | | | |
+| Output | PWM | 4 | Buzzer+ via 220Ω | ✅ Changed from 2 |
+| **WiFi** | | | |
+| Built-in | - | - | Creates AP "ProjectNightfall" | - |
+| **Power** | | | |
+| VIN | 5V | VIN | Buck converter +5V | ✅ |
+| GND | GND | GND | Common ground | **CRITICAL** |
 
 ### Echo Pin Protection Circuit (REQUIRED)
 
@@ -135,41 +130,39 @@ Result: 5V × (2kΩ / 3kΩ) = 3.33V ✅ Safe!
 ## 🎮 Front ESP32 (Motor Slave) - CORRECTED PINS
 
 ### Role
-
 - **WiFi:** Client → Connects to "ProjectNightfall"
 - **WebSocket:** Client → ws://192.168.4.1:8888
 - **Controls:** 4 front motors via 2× L298N drivers
 
 ### Safe Pin Assignments ✅
 
-| Function            | Pin | GPIO | Wire To                        | Notes                |
-| ------------------- | --- | ---- | ------------------------------ | -------------------- |
-| **L298N Driver #1** |     |      |                                |                      |
-| Motor 1 Speed       | ENA | 13   | L298N #1 ENA                   | PWM 0-255 ✅         |
-| Motor 1 Dir A       | IN1 | 23   | L298N #1 IN1                   | ✅ Changed           |
-| Motor 1 Dir B       | IN2 | 22   | L298N #1 IN2                   | ✅ Changed           |
-| Motor 2 Speed       | ENB | 25   | L298N #1 ENB                   | PWM 0-255 ✅         |
-| Motor 2 Dir A       | IN3 | 26   | L298N #1 IN3                   | ✅                   |
-| Motor 2 Dir B       | IN4 | 27   | L298N #1 IN4                   | ✅                   |
-| **L298N Driver #2** |     |      |                                |                      |
-| Motor 3 Speed       | ENA | 14   | L298N #2 ENA                   | PWM 0-255 ✅ Changed |
-| Motor 3 Dir A       | IN1 | 32   | L298N #2 IN1                   | ✅ Changed           |
-| Motor 3 Dir B       | IN2 | 33   | L298N #2 IN2                   | ✅ Changed           |
-| Motor 4 Speed       | ENB | 15   | L298N #2 ENB                   | PWM 0-255 ✅ Changed |
-| Motor 4 Dir A       | IN3 | 19   | L298N #2 IN3                   | ✅                   |
-| Motor 4 Dir B       | IN4 | 21   | L298N #2 IN4                   | ✅                   |
-| **WiFi**            |     |      |                                |                      |
-| Built-in            | -   | -    | Connects to "ProjectNightfall" | -                    |
-| **Power**           |     |      |                                |                      |
-| VIN                 | 5V  | VIN  | Buck converter +5V             | ✅                   |
-| GND                 | GND | GND  | Common ground                  | **CRITICAL**         |
+| Function | Pin | GPIO | Wire To | Notes |
+|----------|-----|------|---------|-------|
+| **L298N Driver #1** | | | |
+| Motor 1 Speed | ENA | 13 | L298N #1 ENA | PWM 0-255 ✅ |
+| Motor 1 Dir A | IN1 | 23 | L298N #1 IN1 | ✅ Changed |
+| Motor 1 Dir B | IN2 | 22 | L298N #1 IN2 | ✅ Changed |
+| Motor 2 Speed | ENB | 25 | L298N #1 ENB | PWM 0-255 ✅ |
+| Motor 2 Dir A | IN3 | 26 | L298N #1 IN3 | ✅ |
+| Motor 2 Dir B | IN4 | 27 | L298N #1 IN4 | ✅ |
+| **L298N Driver #2** | | | |
+| Motor 3 Speed | ENA | 14 | L298N #2 ENA | PWM 0-255 ✅ Changed |
+| Motor 3 Dir A | IN1 | 32 | L298N #2 IN1 | ✅ Changed |
+| Motor 3 Dir B | IN2 | 33 | L298N #2 IN2 | ✅ Changed |
+| Motor 4 Speed | ENB | 15 | L298N #2 ENB | PWM 0-255 ✅ Changed |
+| Motor 4 Dir A | IN3 | 19 | L298N #2 IN3 | ✅ |
+| Motor 4 Dir B | IN4 | 21 | L298N #2 IN4 | ✅ |
+| **WiFi** | | | |
+| Built-in | - | - | Connects to "ProjectNightfall" | - |
+| **Power** | | | |
+| VIN | 5V | VIN | Buck converter +5V | ✅ |
+| GND | GND | GND | Common ground | **CRITICAL** |
 
 ---
 
 ## 📷 ESP32-CAM (Telemetry Bridge) - CORRECTED
 
 ### Role
-
 - **WiFi:** Client → Connects to "ProjectNightfall"
 - **WebSocket:** Client → ws://192.168.4.1:8888
 - **Reports:** System health, status
@@ -177,23 +170,23 @@ Result: 5V × (2kΩ / 3kΩ) = 3.33V ✅ Safe!
 
 ### Pin Assignments (AI-Thinker ESP32-CAM)
 
-| Function                     | Pin       | GPIO                     | Notes                          |
-| ---------------------------- | --------- | ------------------------ | ------------------------------ |
-| **Built-in Camera (OV2640)** |           |                          |                                |
-| Camera Pins                  | Various   | 0,5,18,19,21-27,34-36,39 | **DO NOT USE**                 |
-| **Flash LED**                |           |                          |                                |
-| White LED                    | Built-in  | 4                        | PWM for brightness             |
-| **Status LED (Optional)**    |           |                          |                                |
-| External LED                 | Output    | 12                       | LED+ via 220Ω → GND ✅         |
-| **Programming (FTDI)**       |           |                          |                                |
-| TX0                          | Serial    | 1                        | → FTDI RX                      |
-| RX0                          | Serial    | 3                        | → FTDI TX                      |
-| GPIO 0                       | Boot Mode | 0                        | Hold LOW to upload             |
-| **WiFi**                     |           |                          |                                |
-| Built-in                     | -         | -                        | Connects to "ProjectNightfall" |
-| **Power**                    |           |                          |                                |
-| 5V                           | Power     | 5V                       | Buck converter +5V ✅          |
-| GND                          | Ground    | GND                      | Common ground                  |
+| Function | Pin | GPIO | Notes |
+|----------|-----|------|-------|
+| **Built-in Camera (OV2640)** | | |
+| Camera Pins | Various | 0,5,18,19,21-27,34-36,39 | **DO NOT USE** |
+| **Flash LED** | | |
+| White LED | Built-in | 4 | PWM for brightness |
+| **Status LED (Optional)** | | |
+| External LED | Output | 12 | LED+ via 220Ω → GND ✅ |
+| **Programming (FTDI)** | | |
+| TX0 | Serial | 1 | → FTDI RX |
+| RX0 | Serial | 3 | → FTDI TX |
+| GPIO 0 | Boot Mode | 0 | Hold LOW to upload |
+| **WiFi** | | |
+| Built-in | - | - | Connects to "ProjectNightfall" |
+| **Power** | | |
+| 5V | Power | 5V | Buck converter +5V ✅ |
+| GND | Ground | GND | Common ground |
 
 ### ESP32-CAM Programming Procedure
 
@@ -231,7 +224,7 @@ Step 3: Normal Operation
    - VCC → 12V from battery (motor power)
    - GND → Common ground
    - 5V pin → Leave disconnected OR use as 5V output
-
+   
 3. Logic Connections (from ESP32):
    - ENA → PWM pin (speed control)
    - IN1 → GPIO pin (direction bit 1)
@@ -345,7 +338,6 @@ GPIO  | Function            | Direction | Notes
 ### Step 2: ESP32 Individual Tests
 
 **Test Back ESP32:**
-
 ```
 1. Connect ONLY Back ESP32 to power
 2. Open Serial Monitor (115200 baud)
@@ -361,7 +353,6 @@ GPIO  | Function            | Direction | Notes
 ```
 
 **Test Front ESP32:**
-
 ```
 1. Keep Back ESP32 powered
 2. Power on Front ESP32
@@ -377,7 +368,6 @@ GPIO  | Function            | Direction | Notes
 ```
 
 **Test Camera ESP32:**
-
 ```
 1. Program ESP32-CAM (GPIO 0 to GND, upload, disconnect)
 2. Power on Camera ESP32
@@ -391,7 +381,6 @@ GPIO  | Function            | Direction | Notes
 ### Step 3: Sensor Tests (Motors Still Disconnected)
 
 **Test Ultrasonic Sensors:**
-
 ```
 1. Place object 30cm in front of robot
 2. Check dashboard or serial monitor
@@ -406,7 +395,6 @@ GPIO  | Function            | Direction | Notes
 ```
 
 **Test Gas Sensor:**
-
 ```
 1. Power on (sensor needs 30 sec warmup)
 2. Read baseline value (should be 200-400)
@@ -423,14 +411,12 @@ GPIO  | Function            | Direction | Notes
 ### Step 4: Motor Tests (One at a Time)
 
 **Safety First:**
-
 ```
 ⚠️ WHEELS OFF GROUND OR USE BLOCKS
 ⚠️ BE READY TO DISCONNECT POWER
 ```
 
 **Test Each Motor:**
-
 ```
 1. Connect ONE motor to L298N OUT1/OUT2
 2. In dashboard, send FORWARD command
@@ -502,7 +488,6 @@ Repeat for all 6 motors
 **Problem:** Front/Camera ESP32 won't connect to WiFi
 
 **Solutions:**
-
 1. Check WiFi password matches exactly
 2. Verify Back ESP32 AP is running (check serial)
 3. Move ESP32s closer together (<5m for testing)
@@ -514,7 +499,6 @@ Repeat for all 6 motors
 **Problem:** Connected to WiFi but WebSocket fails
 
 **Solutions:**
-
 1. Verify WebSocket server started (check Back ESP32 serial)
 2. Check firewall not blocking port 8888
 3. Verify IP address is 192.168.4.1
@@ -525,7 +509,6 @@ Repeat for all 6 motors
 **Problem:** Motors don't spin
 
 **Solutions:**
-
 1. Check L298N VCC = 12V (motor power)
 2. Verify ESP32 GND connected to L298N GND
 3. Confirm ENA/ENB jumpers removed
@@ -537,7 +520,6 @@ Repeat for all 6 motors
 **Problem:** Ultrasonic shows 0 or max value
 
 **Solutions:**
-
 1. Check voltage divider installed correctly
 2. Verify VCC = 5V, GND connected
 3. Test with different object (not transparent/soft)
@@ -546,7 +528,6 @@ Repeat for all 6 motors
 **Problem:** Gas sensor always shows high value
 
 **Solutions:**
-
 1. Let sensor warm up 1-2 minutes
 2. Check in clean air (outdoor or ventilated area)
 3. Calibrate threshold in code
@@ -560,7 +541,7 @@ Repeat for all 6 motors
 
 ```
         [Front View]
-
+     
     M1  M2    (Front ESP32)
      │  │         ↓
     ┌────────────────┐
@@ -579,10 +560,10 @@ Repeat for all 6 motors
     M5  M6   │
      │  │    │
     [Rear Motors]
-
+    
     [Battery Pack]
     [Buck Converter]
-
+    
     [ESP32-CAM]
     (Mounted high for camera view)
 ```
@@ -608,14 +589,12 @@ Signals:
 ## 📚 Additional Resources
 
 ### Pin Reference Links
-
 - [ESP32 DevKit Pinout](https://randomnerdtutorials.com/esp32-pinout-reference-gpios/)
 - [ESP32-CAM Pinout](https://randomnerdtutorials.com/esp32-cam-ai-thinker-pinout/)
 - [L298N Datasheet](https://www.st.com/resource/en/datasheet/l298.pdf)
 - [HC-SR04 Datasheet](https://cdn.sparkfun.com/datasheets/Sensors/Proximity/HCSR04.pdf)
 
 ### Code Examples
-
 - WebSocket Server: `src/main_rear.cpp`
 - WebSocket Client: `src/main_front.cpp`
 - Motor Control: `lib/Motors/L298N.cpp`

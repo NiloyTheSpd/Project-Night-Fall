@@ -31,8 +31,9 @@ private:
     float _rearDist;
     int _gasLevel;
 
-    // Timing
+    // Timing & Stagger
     unsigned long _lastUpdate;
+    bool _readFrontNext;  // Alternates between front/rear to prevent crosstalk
 };
 
 #endif

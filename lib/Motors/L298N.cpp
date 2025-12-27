@@ -16,8 +16,9 @@
 L298N::L298N(uint8_t ena1, uint8_t in1a, uint8_t in1b,
              uint8_t ena2, uint8_t in2a, uint8_t in2b,
              uint8_t channel1, uint8_t channel2)
-    : _ena1(ena1), _in1a(in1a), _in1b(in1b), _channel1(channel1), _speed1(0),
-      _ena2(ena2), _in2a(in2a), _in2b(in2b), _channel2(channel2), _speed2(0)
+    : _ena1(ena1), _in1a(in1a), _in1b(in1b), _channel1(channel1), _speed1(0), _target1(0),
+      _ena2(ena2), _in2a(in2a), _in2b(in2b), _channel2(channel2), _speed2(0), _target2(0),
+      _rampRate(10)  // Default: 10 PWM units per update (~1.25s full ramp at 20Hz)
 {
 }
 
@@ -130,4 +131,60 @@ void L298N::setSingleMotorSpeed(uint8_t ena, uint8_t in1, uint8_t in2,
         digitalWrite(in2, LOW);
         ledcWrite(channel, 0);
     }
+}
+
+// ============================================
+// RAMPED SPEED CONTROL
+// ============================================
+
+void L298N::setMotorsRamped(int target1, int target2)
+{
+    _target1 = constrain(target1, -255, 255);
+    _target2 = constrain(target2, -255, 255);
+}
+
+void L298N::setRampRate(uint8_t rate)
+{
+    _rampRate = (rate > 0) ? rate : 1;  // Minimum rate of 1
+}
+
+bool L298N::update()
+{
+    // Move current speeds towards targets
+    int newSpeed1 = moveTowards(_speed1, _target1, _rampRate);
+    int newSpeed2 = moveTowards(_speed2, _target2, _rampRate);
+    
+    // Only update hardware if speed changed
+    if (newSpeed1 != _speed1)
+    {
+        _speed1 = newSpeed1;
+        setSingleMotorSpeed(_ena1, _in1a, _in1b, _speed1, _channel1);
+    }
+    
+    if (newSpeed2 != _speed2)
+    {
+        _speed2 = newSpeed2;
+        setSingleMotorSpeed(_ena2, _in2a, _in2b, _speed2, _channel2);
+    }
+    
+    // Return true if still ramping
+    return isRamping();
+}
+
+bool L298N::isRamping() const
+{
+    return (_speed1 != _target1) || (_speed2 != _target2);
+}
+
+int L298N::moveTowards(int current, int target, int step)
+{
+    if (current < target)
+    {
+        return min(current + step, target);
+    }
+    else if (current > target)
+    {
+        return max(current - step, target);
+    }
+    return current;
 }
