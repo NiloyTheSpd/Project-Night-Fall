@@ -10,7 +10,6 @@
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
 
-#define FRONT_CONTROLLER
 #include "config.h"
 #include "pins.h"
 

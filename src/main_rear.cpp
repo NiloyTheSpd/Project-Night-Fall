@@ -16,7 +16,6 @@
 #include <ArduinoJson.h>
 #include <esp_task_wdt.h>
 
-#define BACK_CONTROLLER
 #include "config.h"
 #include "pins.h"
 
