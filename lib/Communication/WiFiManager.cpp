@@ -16,17 +16,58 @@ WSClient_Manager::WSClient_Manager(const char *ssid, const char *password, const
 
 void WSClient_Manager::begin()
 {
+    beginWithTimeout(0); // No timeout by default, use update() for non-blocking
+}
+
+void WSClient_Manager::beginWithTimeout(uint32_t timeoutMs)
+{
+    Serial.println();
+    Serial.println("[WSClient] ===== WiFi Client Startup =====");
+    Serial.printf("[WSClient] Target SSID: %s\n", _ssid);
+    Serial.printf("[WSClient] Role: %s\n", _role);
+    Serial.flush();
+
     WiFi.mode(WIFI_STA);
     WiFi.begin(_ssid, _password);
-    Serial.printf("[WSClient] Connecting to WiFi AP: %s\n", _ssid);
 
+    // If timeout specified, wait for connection (useful during boot)
+    if (timeoutMs > 0) {
+        Serial.printf("[WSClient] Waiting for WiFi (timeout: %lu ms)...\n", timeoutMs);
+        unsigned long startTime = millis();
+        int dotCount = 0;
+        
+        while (WiFi.status() != WL_CONNECTED && (millis() - startTime) < timeoutMs) {
+            delay(500);
+            Serial.print(".");
+            dotCount++;
+            if (dotCount % 20 == 0) Serial.println();
+        }
+        Serial.println();
+        
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.printf("[WSClient] WiFi connected! IP: %s\n", WiFi.localIP().toString().c_str());
+        } else {
+            Serial.println("[WSClient] WiFi connection TIMEOUT - continuing anyway");
+            Serial.println("[WSClient] Will retry in background via update()");
+        }
+    } else {
+        Serial.println("[WSClient] WiFi started (non-blocking mode)");
+    }
+    Serial.flush();
+
+    // Initialize WebSocket (non-blocking)
+    Serial.printf("[WSClient] WebSocket target: ws://%s:%d/ws\n", _serverIP, _serverPort);
     _webSocket.begin(_serverIP, _serverPort, "/ws");
-    
+
     // Register event handler
     _webSocket.onEvent(onWebSocketEvent);
-    
+
     // Auto reconnect every 5s if lost
-    _webSocket.setReconnectInterval(5000); 
+    _webSocket.setReconnectInterval(5000);
+    
+    Serial.println("[WSClient] ===== Startup Complete =====");
+    Serial.println();
+    Serial.flush();
 }
 
 void WSClient_Manager::update()
@@ -34,11 +75,13 @@ void WSClient_Manager::update()
     unsigned long now = millis();
 
     // WiFi Reconnect Logic
-    if (now - _lastWiFiCheck >= 5000) {
+    if (now - _lastWiFiCheck >= 5000)
+    {
         _lastWiFiCheck = now;
-        if (WiFi.status() != WL_CONNECTED) {
+        if (WiFi.status() != WL_CONNECTED)
+        {
             Serial.println("[WSClient] WiFi lost. Reconnecting...");
-            WiFi.disconnect(); 
+            WiFi.disconnect();
             WiFi.begin(_ssid, _password);
         }
     }
@@ -70,48 +113,53 @@ void WSClient_Manager::setMessageHandler(std::function<void(const JsonDocument &
 
 void WSClient_Manager::onWebSocketEvent(WStype_t type, uint8_t *payload, size_t length)
 {
-    if (!g_wsClientInstance) return;
+    if (!g_wsClientInstance)
+        return;
 
-    switch(type) {
-        case WStype_DISCONNECTED:
-            Serial.printf("[WSClient] Disconnected!\n");
-            g_wsClientInstance->_wsConnected = false;
-            break;
-            
-        case WStype_CONNECTED:
-            Serial.printf("[WSClient] Connected to url: %s\n", payload);
-            g_wsClientInstance->_wsConnected = true;
-            
-            // Send Role Handshake
-            {
-                StaticJsonDocument<256> doc;
-                doc["type"] = "status";
-                doc["role"] = g_wsClientInstance->_role;
-                doc["status"] = "connected";
-                g_wsClientInstance->sendMessage(doc);
-            }
-            break;
-            
-        case WStype_TEXT:
-            {
-                StaticJsonDocument<512> doc;
-                DeserializationError error = deserializeJson(doc, payload, length);
-                if (!error && g_wsClientInstance->_messageHandler) {
-                    g_wsClientInstance->_messageHandler(doc);
-                } else if (error) {
-                    Serial.print("[WSClient] JSON Error: ");
-                    Serial.println(error.c_str());
-                }
-            }
-            break;
-            
-        case WStype_BIN:
-        case WStype_ERROR:
-        case WStype_FRAGMENT_TEXT_START:
-        case WStype_FRAGMENT_BIN_START:
-        case WStype_FRAGMENT:
-        case WStype_FRAGMENT_FIN:
-            break;
+    switch (type)
+    {
+    case WStype_DISCONNECTED:
+        Serial.printf("[WSClient] Disconnected!\n");
+        g_wsClientInstance->_wsConnected = false;
+        break;
+
+    case WStype_CONNECTED:
+        Serial.printf("[WSClient] Connected to url: %s\n", payload);
+        g_wsClientInstance->_wsConnected = true;
+
+        // Send Role Handshake
+        {
+            StaticJsonDocument<256> doc;
+            doc["type"] = "status";
+            doc["role"] = g_wsClientInstance->_role;
+            doc["status"] = "connected";
+            g_wsClientInstance->sendMessage(doc);
+        }
+        break;
+
+    case WStype_TEXT:
+    {
+        StaticJsonDocument<512> doc;
+        DeserializationError error = deserializeJson(doc, payload, length);
+        if (!error && g_wsClientInstance->_messageHandler)
+        {
+            g_wsClientInstance->_messageHandler(doc);
+        }
+        else if (error)
+        {
+            Serial.print("[WSClient] JSON Error: ");
+            Serial.println(error.c_str());
+        }
+    }
+    break;
+
+    case WStype_BIN:
+    case WStype_ERROR:
+    case WStype_FRAGMENT_TEXT_START:
+    case WStype_FRAGMENT_BIN_START:
+    case WStype_FRAGMENT:
+    case WStype_FRAGMENT_FIN:
+        break;
     }
 }
 
@@ -131,7 +179,7 @@ void WSServer_Manager::begin()
 {
     // Start AP
     WiFi.mode(WIFI_AP);
-    // Config values from config.h should trigger compile error if mismatch, 
+    // Config values from config.h should trigger compile error if mismatch,
     // but here we hardcode or use macros. Assuming config.h has them.
     WiFi.softAP("ProjectNightfall", "rescue2025");
     Serial.println("[WSServer] AP Started: ProjectNightfall");
@@ -139,9 +187,8 @@ void WSServer_Manager::begin()
     Serial.println(WiFi.softAPIP());
 
     // Setup WebSocket
-    _ws.onEvent([this](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
-        onEvent(server, client, type, arg, data, len);
-    });
+    _ws.onEvent([this](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len)
+                { onEvent(server, client, type, arg, data, len); });
 
     _server.addHandler(&_ws);
     _server.begin();
@@ -162,42 +209,52 @@ void WSServer_Manager::broadcast(const JsonDocument &doc)
 
 void WSServer_Manager::onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len)
 {
-    if (type == WS_EVT_CONNECT) {
+    if (type == WS_EVT_CONNECT)
+    {
         Serial.printf("[WSServer] Client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
         _clientRoles[client->id()] = "unknown"; // Default
-    } 
-    else if (type == WS_EVT_DISCONNECT) {
+    }
+    else if (type == WS_EVT_DISCONNECT)
+    {
         Serial.printf("[WSServer] Client #%u disconnected\n", client->id());
         _clientRoles.erase(client->id());
-    } 
-    else if (type == WS_EVT_DATA) {
+    }
+    else if (type == WS_EVT_DATA)
+    {
         handleWebSocketMessage(arg, data, len, client);
     }
 }
 
 void WSServer_Manager::handleWebSocketMessage(void *arg, uint8_t *data, size_t len, AsyncWebSocketClient *client)
 {
-    AwsFrameInfo *info = (AwsFrameInfo*)arg;
-    if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
-        
+    AwsFrameInfo *info = (AwsFrameInfo *)arg;
+    if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT)
+    {
+
         StaticJsonDocument<512> doc;
         DeserializationError error = deserializeJson(doc, data, len);
-        
-        if (!error) {
+
+        if (!error)
+        {
             // Check for status/role message
-            const char* type = doc["type"] | "";
-            if (strcmp(type, "status") == 0) {
-               const char* role = doc["role"] | "";
-               if (strlen(role) > 0) {
-                   _clientRoles[client->id()] = String(role);
-                   Serial.printf("[WSServer] Client #%u registered as %s\n", client->id(), role);
-               }
+            const char *type = doc["type"] | "";
+            if (strcmp(type, "status") == 0)
+            {
+                const char *role = doc["role"] | "";
+                if (strlen(role) > 0)
+                {
+                    _clientRoles[client->id()] = String(role);
+                    Serial.printf("[WSServer] Client #%u registered as %s\n", client->id(), role);
+                }
             }
 
-            if (_messageHandler) {
+            if (_messageHandler)
+            {
                 _messageHandler(doc, client);
             }
-        } else if (error) {
+        }
+        else if (error)
+        {
             Serial.print("[WSServer] JSON Error: ");
             Serial.println(error.c_str());
         }
@@ -214,14 +271,19 @@ uint8_t WSServer_Manager::getClientCount()
     return _ws.count();
 }
 
-String WSServer_Manager::getClientRole(uint32_t id) {
-    if (_clientRoles.count(id)) return _clientRoles[id];
+String WSServer_Manager::getClientRole(uint32_t id)
+{
+    if (_clientRoles.count(id))
+        return _clientRoles[id];
     return "unknown";
 }
 
-bool WSServer_Manager::isRoleConnected(const char* role) {
-    for (auto const& [id, r] : _clientRoles) {
-        if (r.equalsIgnoreCase(role)) return true;
+bool WSServer_Manager::isRoleConnected(const char *role)
+{
+    for (auto const &entry : _clientRoles)
+    {
+        if (entry.second.equalsIgnoreCase(role))
+            return true;
     }
     return false;
 }

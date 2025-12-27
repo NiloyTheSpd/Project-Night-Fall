@@ -27,6 +27,7 @@ public:
     WSClient_Manager(const char *ssid, const char *password, const char *serverIP, uint16_t serverPort, const char *role);
 
     void begin();
+    void beginWithTimeout(uint32_t timeoutMs);  // Blocks until connected or timeout
     void update(); // Must be called in loop()
     bool isConnected();
     bool isWiFiConnected();
